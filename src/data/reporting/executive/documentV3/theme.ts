@@ -29,7 +29,7 @@ html,body{margin:0;padding:0;background:var(--v3-bg);}
   page-break-after:always;border:none;
   /* .content's own background above is a slightly darker tone than the page
      itself (both were --v3-bg before, making every page invisible against
-     its container outside of print) — the shadow below gives each page a
+     its container outside of print) - the shadow below gives each page a
      "sheet" edge on top of that, same reasoning as deck3's .slide.v3. */
   box-shadow:0 6px 22px rgba(0,0,0,.18);
 }

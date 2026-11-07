@@ -35,6 +35,7 @@ import {
   getPopulationMonthDir,
   getSampleMainDir,
   invalidateWorkspaceDirCache,
+  LEGACY_MONTH_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 import {
   DISTRIBUTION_EVENTS_DIR,
@@ -189,6 +190,35 @@ async function getDistributionDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   return getSampleMainDir(directoryHandle, monthFolderName, create);
+}
+
+/**
+ * Where the derived cache may be written, or null when the month no longer has
+ * a sample. The cache is never the first file of a month: `saveSampleMaster`
+ * creates `2-samples/{month}/1-main/` at draw time. So that folder missing
+ * means the month was deleted, unless it is a legacy month whose sample still
+ * lives under its population folder — only then is `1-main/` created for it.
+ * Before this, a background cache persist from any window still showing a
+ * just-deleted month rebuilt the deleted folder around a lone, often torn,
+ * `distribution.current.json`.
+ */
+async function existingDistributionDirForCache(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await getDistributionDir(directoryHandle, monthFolderName, false);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+  try {
+    const legacyMonth = await getLegacyDistributionDir(directoryHandle, monthFolderName);
+    await legacyMonth.getDirectoryHandle(LEGACY_MONTH_SUBFOLDERS.sample, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+  return getDistributionDir(directoryHandle, monthFolderName, true);
 }
 
 async function getLegacyDistributionDir(
@@ -1267,7 +1297,11 @@ export async function saveDistributionCurrent(
 ): Promise<void> {
   // Month lock gate — also covers syncSampleMirrors (only called from here).
   await ensureMonthWritable(directoryHandle, monthFolderName);
-  const dir = await getDistributionDir(directoryHandle, monthFolderName);
+  const dir = await existingDistributionDirForCache(directoryHandle, monthFolderName);
+  // The month's sample folder is gone (an admin deleted the month): this is a
+  // derived cache, so there is nothing to write — and writing it would
+  // recreate the deleted folder around a lone cache file.
+  if (!dir) return;
   const { foldCheckpoint, ...cacheWithoutCheckpoint } = current;
   await safeWriteJson(dir, CURRENT_FILE, cacheWithoutCheckpoint);
   if (foldCheckpoint) {
@@ -1623,6 +1657,17 @@ async function mismatchClearsOnReread(
   }
 }
 
+/**
+ * The derived cache is read WITHOUT the `.bak` / `.tmp` sibling fallback. A
+ * damaged live copy is simply a cache miss: the caller refolds from the event
+ * store and rewrites a fresh copy. Recovering an older sibling instead served
+ * stale state and raised the «تعذّرت قراءة النسخة الأصلية» banner on every load
+ * — forever, since the admin boot repair deliberately never heals this file
+ * from a sibling (`bootIntegrityScan.ts`'s SIBLING_HEAL_EXCLUDED_NAMES), so
+ * the repair the banner promised never came.
+ */
+const CACHE_READ = { siblingFallback: false } as const;
+
 async function loadDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
@@ -1631,7 +1676,8 @@ async function loadDistributionCurrent(
     const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<DistributionCurrentData>(
       dir,
-      CURRENT_FILE
+      CURRENT_FILE,
+      CACHE_READ
     );
     if (result.ok) return result.value;
   } catch {
@@ -1640,7 +1686,7 @@ async function loadDistributionCurrent(
 
   try {
     const legacyDir = await getLegacyDistributionDir(directoryHandle, monthFolderName);
-    const result = await safeReadJson<DistributionCurrentData>(legacyDir, CURRENT_FILE);
+    const result = await safeReadJson<DistributionCurrentData>(legacyDir, CURRENT_FILE, CACHE_READ);
     return result.ok ? result.value : null;
   } catch {
     return null;

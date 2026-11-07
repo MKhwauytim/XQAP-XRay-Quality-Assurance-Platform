@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`deck3 kit snapshot > barChart 1`] = `"<div class="v3-plot grow"><div class="v3-bars" style="gap:20px;padding:0 20px"><div class="v3-cell"><div class="v3-bar v3-tone-gold" style="max-width:92px;height:40.0%"><span>40.0%</span></div></div><div class="v3-cell"></div></div></div><div class="v3-cats" style="gap:20px;padding:0 20px"><div class="v3-cat">أ</div><div class="v3-cat">ب</div></div>"`;
+
+exports[`deck3 kit snapshot > contentHead 1`] = `
+"<header class="v3-head">
+  <div class="v3-eyebrow"><span>القسم</span></div>
+  <div class="v3-title-row"><h2 class="v3-h2">العنوان</h2><span class="v3-head-note">ملاحظة</span></div>
+</header>"
+`;
+
+exports[`deck3 kit snapshot > dataTable with totals 1`] = `"<table class="v3-table"><thead><tr><th>الميناء</th><th>العدد</th><th>النسبة</th></tr></thead><tbody><tr><td>جدة</td><td>10</td><td>50%</td></tr><tr><td>الدمام</td><td>6</td><td>30%</td></tr><tr><td>الرياض</td><td>4</td><td>20%</td></tr></tbody><tfoot><tr><td>الإجمالي</td><td>20</td><td>100%</td></tr></tfoot></table>"`;
+
+exports[`deck3 kit snapshot > groupedBarChart 1`] = `"<div class="v3-plot grow"><div class="v3-bars" style="gap:26px;padding:0 22px"><div class="v3-group"><div class="v3-cell"><div class="v3-bar v3-tone-gold" style="max-width:96px;height:30.0%"><span>30.0%</span></div></div><div class="v3-cell"><div class="v3-bar v3-tone-blue" style="max-width:96px;height:70.0%"><span>70.0%</span></div></div></div><div class="v3-group"><div class="v3-cell"><div class="v3-bar v3-tone-gold" style="max-width:96px;height:55.0%"><span>55.0%</span></div></div><div class="v3-cell"></div></div></div></div><div class="v3-cats" style="gap:26px;padding:0 22px"><div class="v3-cat">جدة</div><div class="v3-cat">الدمام</div></div>"`;
+
+exports[`deck3 kit snapshot > kpiBand 1`] = `
+"<div class="v3-kpi-band top"><div class="v3-kpi-cell">
+  <span class="v3-kpi-label">إجمالي</span>
+  <div class="v3-kpi-row"><span class="v3-kpi-value v3-ink-gold">120</span><span class="v3-kpi-aside">عينة</span></div>
+  
+</div><div class="v3-kpi-cell">
+  <span class="v3-kpi-label">المطابقة</span>
+  <div class="v3-kpi-row"><span class="v3-kpi-value v3-ink-gold">85%</span></div>
+  <span class="v3-kpi-sub">من الإجمالي</span>
+</div></div>"
+`;
+
+exports[`deck3 kit snapshot > tintedPanel 1`] = `
+"<div class="v3-panel sea">
+  <div class="v3-panel-head"><span class="v3-panel-title">بحري</span></div>
+  <p>x</p>
+</div>"
+`;

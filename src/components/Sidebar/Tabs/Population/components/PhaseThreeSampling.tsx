@@ -219,6 +219,11 @@ export default function PhaseThreeSampling({
             </span>
           </div>
           <p className="p3-total-note">{L.sampling_running_total_note}</p>
+          {(config.priorityPorts?.length ?? 0) > 0 && (
+            <p className="p3-total-note">
+              {fillTemplate(L.p3_priority_ports_active, { ports: (config.priorityPorts ?? []).join("، ") })}
+            </p>
+          )}
           <div className="p3-total-stages">
             {stageComputations.map(({ rule, finalCount }) => (
               <span key={rule.stageKey} className="p3-total-stage-row">

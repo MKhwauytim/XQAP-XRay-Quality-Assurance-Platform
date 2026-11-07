@@ -1,6 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Settings2, X } from "lucide-react";
-import { derivePortCatalog, type PortCatalogRow } from "../../../../../data/distribution/portEligibility";
+import {
+  derivePortCatalog,
+  mergeKnownPorts,
+  type KnownPort,
+  type PortCatalogRow,
+} from "../../../../../data/distribution/portEligibility";
+import { loadKnownPorts } from "../../../../../data/population/knownPorts";
+import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import CertScanPortsModal from "./CertScanPortsModal";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
@@ -44,6 +51,8 @@ type MappingSettingsModalProps = {
   /** C2: the caller's `canMutate("configure-sample")`. The picker section is not
    *  rendered without it, and the save handler re-checks it. Default false. */
   canEditCertScanPorts?: boolean;
+  /** The workspace, to list ports seen in earlier months in both port pickers. Optional: without it only this month's rows (and flagged ports) are listed. */
+  directoryHandle?: DirectoryHandleLike | null;
 };
 
 export default function MappingSettingsModal({
@@ -59,6 +68,7 @@ export default function MappingSettingsModal({
   onSampleSeedChange,
   certScanPortRows,
   canEditCertScanPorts = false,
+  directoryHandle = null,
 }: MappingSettingsModalProps) {
   const controller = useMappingSettingsController({
     isOpen,
@@ -76,10 +86,31 @@ export default function MappingSettingsModal({
 
   const labels = useLabels();
   const [certScanPortsOpen, setCertScanPortsOpen] = useState(false);
-  const certScanPortCatalog = useMemo(
-    () => (certScanPortsOpen && canEditCertScanPorts ? derivePortCatalog(certScanPortRows ?? []) : []),
-    [certScanPortsOpen, canEditCertScanPorts, certScanPortRows]
+  const [priorityPortsOpen, setPriorityPortsOpen] = useState(false);
+  const pickerOpen = (certScanPortsOpen || priorityPortsOpen) && canEditCertScanPorts;
+  // Ports from earlier months' samples, so both pickers list every known port
+  // before this month's file is uploaded or processed. Re-read on every picker
+  // opening (`pickerEpoch`, bumped by the open buttons) so the list is current;
+  // a result is only "this opening's" when its epoch matches.
+  const [pickerEpoch, setPickerEpoch] = useState(0);
+  const [knownPorts, setKnownPorts] = useState<{ epoch: number; ports: KnownPort[] } | null>(null);
+  useEffect(() => {
+    if (!pickerOpen || !directoryHandle) return;
+    let cancelled = false;
+    void loadKnownPorts(directoryHandle).then((ports) => {
+      if (!cancelled) setKnownPorts({ epoch: pickerEpoch, ports });
+    });
+    return () => { cancelled = true; };
+  }, [pickerOpen, directoryHandle, pickerEpoch]);
+  const portCatalog = useMemo(
+    () => (pickerOpen ? mergeKnownPorts(derivePortCatalog(certScanPortRows ?? []), knownPorts?.ports ?? []) : []),
+    [pickerOpen, certScanPortRows, knownPorts]
   );
+  const knownPortsLoading = pickerOpen && directoryHandle !== null && knownPorts?.epoch !== pickerEpoch;
+  const openPicker = (open: (value: boolean) => void): void => {
+    setPickerEpoch((epoch) => epoch + 1);
+    open(true);
+  };
 
   if (!isOpen) return null;
 
@@ -188,8 +219,20 @@ export default function MappingSettingsModal({
                   <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--population-muted)" }}>
                     {labels.p2_certscan_ports_section_hint}
                   </p>
-                  <button type="button" className="proc-export-btn" onClick={() => setCertScanPortsOpen(true)}>
+                  <button type="button" className="proc-export-btn" onClick={() => openPicker(setCertScanPortsOpen)}>
                     {labels.p2_certscan_ports_open.replace("{count}", String(config.certScanPorts?.length ?? 0))}
+                  </button>
+                </div>
+              )}
+
+              {canEditCertScanPorts && (
+                <div>
+                  <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>{labels.p2_priority_ports_section_title}</h3>
+                  <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--population-muted)" }}>
+                    {labels.p2_priority_ports_section_hint}
+                  </p>
+                  <button type="button" className="proc-export-btn" onClick={() => openPicker(setPriorityPortsOpen)}>
+                    {labels.p2_priority_ports_open.replace("{count}", String(config.priorityPorts?.length ?? 0))}
                   </button>
                 </div>
               )}
@@ -316,7 +359,8 @@ export default function MappingSettingsModal({
       />
       {certScanPortsOpen && canEditCertScanPorts && (
         <CertScanPortsModal
-          portCatalog={certScanPortCatalog}
+          portCatalog={portCatalog}
+          loading={knownPortsLoading}
           selectedPorts={config.certScanPorts ?? []}
           onClose={() => setCertScanPortsOpen(false)}
           onSave={(ports) => {
@@ -324,6 +368,26 @@ export default function MappingSettingsModal({
             if (!canEditCertScanPorts) return;
             onConfigChange({ ...config, certScanPorts: ports });
             setCertScanPortsOpen(false);
+          }}
+        />
+      )}
+      {priorityPortsOpen && canEditCertScanPorts && (
+        <CertScanPortsModal
+          portCatalog={portCatalog}
+          loading={knownPortsLoading}
+          selectedPorts={config.priorityPorts ?? []}
+          texts={{
+            title: labels.p2_priority_ports_title,
+            hint: labels.p2_priority_ports_section_hint,
+            status: labels.p2_priority_ports_status,
+            closeAria: labels.p2_priority_ports_close_aria,
+          }}
+          onClose={() => setPriorityPortsOpen(false)}
+          onSave={(ports) => {
+            // Same handler-side gate as the CertScan picker above.
+            if (!canEditCertScanPorts) return;
+            onConfigChange({ ...config, priorityPorts: ports });
+            setPriorityPortsOpen(false);
           }}
         />
       )}

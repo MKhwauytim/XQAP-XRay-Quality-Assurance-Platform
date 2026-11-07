@@ -46,9 +46,46 @@ export const CORRECTABLE_POPULATION_FIELDS = [
   "chassisNumber",
   "movementType",
   "reportNumber",
+  "stage",
+  "xrayLevelOneResult",
+  "xrayLevelTwoResult",
 ] as const satisfies readonly (keyof EmployeeMirrorRowStub)[];
 
 export type CorrectablePopulationField = (typeof CORRECTABLE_POPULATION_FIELDS)[number];
+
+/**
+ * Pipeline-derived fields (see the docblock) that a re-import may only FILL
+ * when they are blank on the population row — never overwrite. Owner request
+ * 2026-11-01: rows arrive with an empty level-1/level-2 result or stage, and
+ * the export is how those get completed by hand.
+ */
+export const FILL_ONLY_POPULATION_FIELDS: ReadonlySet<CorrectablePopulationField> = new Set([
+  "stage",
+  "xrayLevelOneResult",
+  "xrayLevelTwoResult",
+]);
+
+/** Allowed values for a fill-only field; a field not listed accepts any text. */
+export const FILL_ONLY_ALLOWED_VALUES: Partial<Record<CorrectablePopulationField, readonly string[]>> = {
+  xrayLevelOneResult: ["سليمة", "اشتباه"],
+  xrayLevelTwoResult: ["سليمة", "اشتباه"],
+};
+
+/**
+ * The rest of what the employee's table shows, exported for reference so the
+ * sheet carries every column on screen. The re-import ignores these headers.
+ */
+export const REFERENCE_ONLY_EXPORT_FIELDS = [
+  "certScanStatus",
+  "targetedByRiskEngine",
+  "riskMessage",
+] as const satisfies readonly (keyof EmployeeMirrorRowStub)[];
+
+const REFERENCE_FIELD_LABEL_KEYS: Record<(typeof REFERENCE_ONLY_EXPORT_FIELDS)[number], keyof Labels> = {
+  certScanStatus: "col_certscan_status",
+  targetedByRiskEngine: "col_targeted_by_risk",
+  riskMessage: "col_risk_message",
+};
 
 /** Label key for each correctable field's column header — reused for both the
  *  export sheet and the import summary, so the two always agree on wording. */
@@ -63,6 +100,9 @@ export const CORRECTABLE_FIELD_LABEL_KEYS: Record<CorrectablePopulationField, ke
   chassisNumber: "col_chassis_number",
   movementType: "col_movement_type",
   reportNumber: "col_report_number",
+  stage: "col_stage",
+  xrayLevelOneResult: "col_xray_l1_result",
+  xrayLevelTwoResult: "col_xray_l2_result",
 };
 
 /** The `xrayImageId` column header — first, locked, deliberately not editable. */
@@ -91,7 +131,12 @@ export function isPendingReferralEntry(
   return isNoImageSubmission(answer, rowTemplate);
 }
 
-export type PendingExportRow = { xrayImageId: string } & Record<CorrectablePopulationField, string>;
+/** Appended to a reference-only column's header so the sheet says it is not read back. */
+export const REFERENCE_HEADER_SUFFIX = " (للاطلاع)";
+
+export type PendingExportRow = { xrayImageId: string } & Record<CorrectablePopulationField, string> & {
+  reference: Record<(typeof REFERENCE_ONLY_EXPORT_FIELDS)[number], string>;
+};
 
 /** Every currently-معلقة row's `xrayImageId` plus its correctable fields, in
  *  export-column order. Pure — the caller decides what to do with the rows
@@ -108,6 +153,11 @@ export function buildPendingExportRows(
       const row = { xrayImageId: entry.xrayImageId } as PendingExportRow;
       for (const field of CORRECTABLE_POPULATION_FIELDS) {
         row[field] = entry.row[field] ?? "";
+      }
+      row.reference = {} as PendingExportRow["reference"];
+      for (const field of REFERENCE_ONLY_EXPORT_FIELDS) {
+        const value = entry.row[field];
+        row.reference[field] = value === null || value === undefined ? "" : String(value);
       }
       return row;
     });
@@ -129,10 +179,12 @@ export function exportPendingCorrectionsXlsx(
   const header = [
     XRAY_IMAGE_ID_HEADER,
     ...CORRECTABLE_POPULATION_FIELDS.map((field) => labels[CORRECTABLE_FIELD_LABEL_KEYS[field]]),
+    ...REFERENCE_ONLY_EXPORT_FIELDS.map((field) => `${labels[REFERENCE_FIELD_LABEL_KEYS[field]]}${REFERENCE_HEADER_SUFFIX}`),
   ];
   const body = rows.map((row) => [
     row.xrayImageId,
     ...CORRECTABLE_POPULATION_FIELDS.map((field) => row[field]),
+    ...REFERENCE_ONLY_EXPORT_FIELDS.map((field) => row.reference[field]),
   ]);
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
   const wb = XLSX.utils.book_new();

@@ -93,6 +93,7 @@ function buildPortProfile(
   const population = populationRows.length;
   const clean = populationRows.filter((row) => row.imageResult === "سليمة").length;
   const suspicious = populationRows.filter((row) => row.imageResult === "اشتباه").length;
+  const otherResults = populationRows.filter((row) => row.imageResult === "other").length;
   const sampled = rows.filter((row) => row.selectedInSample);
   const populationSampled = populationRows === rows ? sampled.length : populationRows.filter((row) => row.selectedInSample).length;
   const studied = sampled.filter(isRowStudied).length;
@@ -130,6 +131,7 @@ function buildPortProfile(
     portName,
     population,
     clean,
+    otherResults,
     suspicious,
     suspicionRate: population > 0 ? (suspicious / population) * 100 : 0,
     sampleSize: sampled.length,

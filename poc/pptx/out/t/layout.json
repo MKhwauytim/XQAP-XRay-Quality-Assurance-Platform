@@ -1,0 +1,654 @@
+{
+  "numfix": "run",
+  "fitSafety": 1.04,
+  "counts": {
+    "paragraphs": 765,
+    "rtl1algnR": 765,
+    "rtl0": 0,
+    "tables": 44,
+    "tblRtl": 44,
+    "lrm": 10,
+    "runRtl0": 513,
+    "slides": 13
+  },
+  "steps": [
+    3,
+    5,
+    22,
+    9,
+    1
+  ],
+  "diagramFit": [
+    {
+      "id": "src",
+      "need": 170,
+      "avail": 244,
+      "fits": true
+    },
+    {
+      "id": "model",
+      "need": 399,
+      "avail": 484,
+      "fits": true
+    },
+    {
+      "id": "html",
+      "need": 91,
+      "avail": 244,
+      "fits": true
+    },
+    {
+      "id": "pdf",
+      "need": 62,
+      "avail": 244,
+      "fits": true
+    },
+    {
+      "id": "pptx",
+      "need": 185,
+      "avail": 244,
+      "fits": true
+    }
+  ],
+  "freeFit": {
+    "need": 312,
+    "avail": 396,
+    "fits": true
+  },
+  "t4": [
+    {
+      "i": 1,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 354,
+      "chars": 24
+    },
+    {
+      "i": 2,
+      "real": true,
+      "step": 1,
+      "size": 25,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 20
+    },
+    {
+      "i": 3,
+      "real": true,
+      "step": 2,
+      "size": 24,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 21
+    },
+    {
+      "i": 4,
+      "real": true,
+      "step": 2,
+      "size": 21.5,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 25
+    },
+    {
+      "i": 5,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 364,
+      "chars": 25
+    },
+    {
+      "i": 6,
+      "real": true,
+      "step": 2,
+      "size": 22.5,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 20
+    },
+    {
+      "i": 7,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 347,
+      "chars": 25
+    },
+    {
+      "i": 8,
+      "real": true,
+      "step": 2,
+      "size": 22,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 22
+    },
+    {
+      "i": 9,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 583,
+      "chars": 42
+    },
+    {
+      "i": 10,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 564,
+      "chars": 44
+    },
+    {
+      "i": 11,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 669,
+      "chars": 52
+    },
+    {
+      "i": 12,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 473,
+      "chars": 37
+    },
+    {
+      "i": 13,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 561,
+      "chars": 41
+    },
+    {
+      "i": 14,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 478,
+      "chars": 36
+    },
+    {
+      "i": 15,
+      "real": true,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 486,
+      "chars": 71
+    },
+    {
+      "i": 16,
+      "real": true,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 489,
+      "chars": 75
+    },
+    {
+      "i": 17,
+      "real": true,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 508,
+      "chars": 82
+    },
+    {
+      "i": 18,
+      "real": true,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 677,
+      "chars": 107
+    },
+    {
+      "i": 19,
+      "real": true,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 741,
+      "chars": 113
+    },
+    {
+      "i": 20,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 762,
+      "chars": 63
+    },
+    {
+      "i": 21,
+      "real": true,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 515,
+      "chars": 40
+    },
+    {
+      "i": 22,
+      "real": true,
+      "step": 2,
+      "size": 24.5,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 21
+    },
+    {
+      "i": 23,
+      "real": false,
+      "step": 1,
+      "size": 25,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 20
+    },
+    {
+      "i": 24,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 498,
+      "chars": 37
+    },
+    {
+      "i": 25,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 405,
+      "chars": 32
+    },
+    {
+      "i": 26,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 462,
+      "chars": 35
+    },
+    {
+      "i": 27,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 563,
+      "chars": 45
+    },
+    {
+      "i": 28,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 640,
+      "chars": 51
+    },
+    {
+      "i": 29,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 586,
+      "chars": 46
+    },
+    {
+      "i": 30,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 758,
+      "chars": 60
+    },
+    {
+      "i": 31,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 665,
+      "chars": 54
+    },
+    {
+      "i": 32,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 543,
+      "chars": 46
+    },
+    {
+      "i": 33,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 695,
+      "chars": 57
+    },
+    {
+      "i": 34,
+      "real": false,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 499,
+      "chars": 82
+    },
+    {
+      "i": 35,
+      "real": false,
+      "step": 3,
+      "size": 25,
+      "lines": 1,
+      "testColW": 883,
+      "chars": 69
+    },
+    {
+      "i": 36,
+      "real": false,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 537,
+      "chars": 88
+    },
+    {
+      "i": 37,
+      "real": false,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 601,
+      "chars": 87
+    },
+    {
+      "i": 38,
+      "real": false,
+      "step": 4,
+      "size": 25,
+      "lines": 2,
+      "testColW": 768,
+      "chars": 121
+    },
+    {
+      "i": 39,
+      "real": false,
+      "step": 5,
+      "size": 25,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 243
+    },
+    {
+      "i": 40,
+      "real": false,
+      "step": 1,
+      "size": 25,
+      "lines": 1,
+      "testColW": 276,
+      "chars": 7
+    }
+  ],
+  "t3": {
+    "perPage": 15,
+    "pages": [
+      15,
+      15,
+      10
+    ],
+    "unfit": [],
+    "header": [
+      "المنفذ",
+      "الصور المدروسة",
+      "المطابقة",
+      "نسبة المطابقة",
+      "تاريخ آخر دراسة"
+    ]
+  },
+  "slides": [
+    {
+      "n": 1,
+      "id": "T1"
+    },
+    {
+      "n": 2,
+      "id": "T3-1"
+    },
+    {
+      "n": 3,
+      "id": "T3-2"
+    },
+    {
+      "n": 4,
+      "id": "T3-3"
+    },
+    {
+      "n": 5,
+      "id": "T4-1"
+    },
+    {
+      "n": 6,
+      "id": "T4-2"
+    },
+    {
+      "n": 7,
+      "id": "T4-3"
+    },
+    {
+      "n": 8,
+      "id": "T4-4"
+    },
+    {
+      "n": 9,
+      "id": "T4-5"
+    },
+    {
+      "n": 10,
+      "id": "T4-6"
+    },
+    {
+      "n": 11,
+      "id": "T4-7"
+    },
+    {
+      "n": 12,
+      "id": "T5"
+    },
+    {
+      "n": 13,
+      "id": "T6"
+    }
+  ],
+  "crops": [
+    {
+      "slide": 1,
+      "name": "t1-pct-none",
+      "x": 1224,
+      "y": 214,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-pct-lrm",
+      "x": 824,
+      "y": 214,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-pct-iso",
+      "x": 424,
+      "y": 214,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-pct-run",
+      "x": 24,
+      "y": 214,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-thou-none",
+      "x": 1224,
+      "y": 334,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-thou-lrm",
+      "x": 824,
+      "y": 334,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-thou-iso",
+      "x": 424,
+      "y": 334,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-thou-run",
+      "x": 24,
+      "y": 334,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-sent-none",
+      "x": 1224,
+      "y": 454,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-sent-lrm",
+      "x": 824,
+      "y": 454,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-sent-iso",
+      "x": 424,
+      "y": 454,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-sent-run",
+      "x": 24,
+      "y": 454,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-date-none",
+      "x": 1224,
+      "y": 574,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-date-lrm",
+      "x": 824,
+      "y": 574,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-date-iso",
+      "x": 424,
+      "y": 574,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-date-run",
+      "x": 24,
+      "y": 574,
+      "w": 392,
+      "h": 112
+    },
+    {
+      "slide": 1,
+      "name": "t1-table",
+      "x": 94,
+      "y": 714,
+      "w": 1732,
+      "h": 168
+    }
+  ],
+  "fontInfo": {
+    "regular": {
+      "family": "Somar",
+      "style": "Regular",
+      "full": "Somar Regular",
+      "version": "Version 1.002;hotconv 1.0.109;makeotfexe 2.5.65596",
+      "fsType": 8,
+      "fsTypeHex": "0x0008",
+      "fsTypeMeaning": [
+        "editable (8)"
+      ],
+      "weight": 400
+    },
+    "bold": {
+      "family": "Somar",
+      "style": "Bold",
+      "full": "Somar Bold",
+      "version": "Version 1.002;hotconv 1.0.109;makeotfexe 2.5.65596",
+      "fsType": 8,
+      "fsTypeHex": "0x0008",
+      "fsTypeMeaning": [
+        "editable (8)"
+      ],
+      "weight": 700
+    }
+  }
+}

@@ -5,11 +5,24 @@ import type { PortCatalogCategory } from "../../../../../data/distribution/portE
 import { useLabels } from "../../../../../data/labels/useLabels";
 import "./PortRestrictionsModal.css";
 
+/** The texts that differ between the port pickers built on this modal. */
+export type PortPickerTexts = {
+  title: string;
+  hint: string;
+  /** `{count}` checked of `{total}` listed. */
+  status: string;
+  closeAria: string;
+};
+
 type CertScanPortsModalProps = {
   portCatalog: PortCatalogCategory[];
   selectedPorts: readonly string[];
   onSave: (ports: string[]) => void;
   onClose: () => void;
+  /** Defaults to the CertScan-ports texts. */
+  texts?: PortPickerTexts;
+  /** Known ports are still being read from earlier months. */
+  loading?: boolean;
 };
 
 /**
@@ -23,9 +36,17 @@ type CertScanPortsModalProps = {
  * saving the picker for one month never silently drops another month's flag.
  * No backdrop-click-to-close (unsaved checkbox edits); close via ✕, the
  * cancel button or Escape.
+ *
+ * Also the priority-ports picker (`texts`): same control, different config field.
  */
-export default function CertScanPortsModal({ portCatalog, selectedPorts, onSave, onClose }: CertScanPortsModalProps) {
+export default function CertScanPortsModal({ portCatalog, selectedPorts, onSave, onClose, texts, loading = false }: CertScanPortsModalProps) {
   const L = useLabels();
+  const t: PortPickerTexts = texts ?? {
+    title: L.p2_certscan_ports_title,
+    hint: L.p2_certscan_ports_section_hint,
+    status: L.p2_certscan_ports_status,
+    closeAria: L.p2_certscan_ports_close_aria,
+  };
   const catalogPortNames = new Set(portCatalog.flatMap((category) => category.ports.map((port) => port.portName)));
   const missingPorts = selectedPorts.filter((portName) => !catalogPortNames.has(portName));
   const categories: PortCatalogCategory[] =
@@ -77,25 +98,26 @@ export default function CertScanPortsModal({ portCatalog, selectedPorts, onSave,
         <div ref={dialogRef} className="prm-modal" role="dialog" aria-modal="true" aria-labelledby="csp-title">
           <div className="prm-head">
             <div>
-              <h3 id="csp-title">{L.p2_certscan_ports_title}</h3>
-              <p className="prm-sub">{L.p2_certscan_ports_section_hint}</p>
+              <h3 id="csp-title">{t.title}</h3>
+              <p className="prm-sub">{t.hint}</p>
             </div>
-            <button type="button" className="prm-close" onClick={onClose} aria-label={L.p2_certscan_ports_close_aria}>
+            <button type="button" className="prm-close" onClick={onClose} aria-label={t.closeAria}>
               ✕
             </button>
           </div>
 
           <div className={`prm-status ${checked.size > 0 ? "restricted" : "unrestricted"}`} role="status">
             <span>
-              {L.p2_certscan_ports_status
+              {t.status
                 .replace("{count}", String(checked.size))
                 .replace("{total}", String(totalPorts))}
             </span>
           </div>
 
           <div className="prm-body">
+            {loading && <p className="prm-empty">{L.p2_ports_loading_known}</p>}
             {categories.length === 0 ? (
-              <p className="prm-empty">{L.p2_certscan_ports_empty_catalog}</p>
+              loading ? null : <p className="prm-empty">{L.p2_certscan_ports_empty_catalog}</p>
             ) : (
               categories.map((category) => {
                 const checkedInCategory = category.ports.filter((port) => checked.has(port.portName)).length;

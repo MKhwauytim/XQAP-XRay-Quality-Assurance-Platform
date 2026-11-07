@@ -33,7 +33,7 @@ ${DECK_V3_FONT_FACE_CSS}
      canvas scaled as a whole. A CSS-only calc can't produce the unitless
      <number> transform:scale() needs from 100vw, so a tiny script owns it.
      --v3-tx is that same script's MEASURED horizontal centering correction
-     (px) — see the script's own doc comment for why this can't be a CSS
+     (px) - see the script's own doc comment for why this can't be a CSS
      margin/right trick. */
   --v3-scale:1; --v3-tx:0px;
 }
@@ -41,20 +41,20 @@ html,body{margin:0;padding:0;}
 body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahoma","Arial",sans-serif;}
 
 /* ── Viewer shell ─────────────────────────────────────────────────────────── */
-/* Dark navy surround, NOT --v3-bg — the handoff's own canvas backdrop is a
+/* Dark navy surround, NOT --v3-bg - the handoff's own canvas backdrop is a
    dark navy (#0b1f33) behind the light slide "paper", and every other
    edition in this app (deck/deckTheme.ts's EXEC_CSS body, which deck1/deck2
    share) already uses the same page-darker-than-slide convention. Reusing
    --v3-bg here (this rule's original value) made the slide and the page
    around it the exact same color, indistinguishable except for a 1px hairline
-   border — that's what made the report hard to read at a glance. */
+   border - that's what made the report hard to read at a glance. */
 .deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-navy);}
 .slide.v3{
   /* Horizontal centering is a MEASURED pixel shift (--v3-tx, set by
      DECK_V3_SCALE_SCRIPT in index.ts), not a CSS margin/right trick. Two
      CSS-only attempts both broke on real windows: margin:0 auto and later
      right:50%/margin-right:-960px (see index.ts's doc comment for exactly
-     why the latter fails — box-model over-constraint resolution for a
+     why the latter fails - box-model over-constraint resolution for a
      position:relative box in a dir=rtl document silently recomputes
      margin-left around margin-right, landing hundreds of px off in a way
      that happened to look fine in every viewport size tested here). Letting
@@ -69,7 +69,7 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
   /* The cover/closing/divider variants below share the page's own navy
      family (--v3-cover-navy / --v3-navy is literally the page background for
      dividers), so a border alone can't separate them from .deck-viewer-v3's
-     surround — only this shadow, kept on the shared base rule so every
+     surround - only this shadow, kept on the shared base rule so every
      variant inherits it, does. */
   box-shadow:0 10px 32px rgba(0,0,0,.4);
   display:flex;flex-direction:column;padding:84px 100px 56px;
@@ -569,11 +569,11 @@ body.deck-fullscreen .slide.v3{display:none;}
    so the display:none rule above never touches it. Left visible, it becomes a
    second flex child next to the active slide in fullscreen's flex-centered
    .deck-viewer-v3, which crowds and offsets the slide instead of centering it
-   alone — hide it in single-slide fullscreen, same as the toolbar/nav chrome. */
+   alone - hide it in single-slide fullscreen, same as the toolbar/nav chrome. */
 body.deck-fullscreen .deck-viewer-v3>.source-revisions{display:none;}
 body.deck-fullscreen .slide.v3.deck-slide-active{
   /* .deck-viewer-v3 itself flex-centers the active slide in fullscreen (see
-     body.deck-fullscreen .deck-viewer-v3 below) — reliable, direction-aware
+     body.deck-fullscreen .deck-viewer-v3 below) - reliable, direction-aware
      flexbox centering, unrelated to the base rule's --v3-tx pixel shift, so
      this override drops translateX entirely rather than trying to cancel it. */
   display:flex;flex:0 0 auto;margin:0;border:none;

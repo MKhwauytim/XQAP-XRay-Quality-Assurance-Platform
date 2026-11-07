@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
 import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
@@ -25,9 +24,9 @@ import { getLabels } from "../../../../../data/labels/labelsStore";
 import { useVisibleUnsavedWorkMonthGuard } from "../../../../../hooks/useVisibleUnsavedWorkMonthGuard";
 import { useUnsavedWork } from "../../../../../hooks/useUnsavedWork";
 import type { AnswerSaveOutcome, FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
-import { isAnswerQueuedPending, loadPendingAnswerItems } from "../../../../../data/answers/answerLocalMirror";
+import { isAnswerQueuedPending, loadPendingAnswerRecords } from "../../../../../data/answers/answerLocalMirror";
+import { ADHOC_MONTH_FOLDER_PREFIX } from "../../../../../data/adhocImport/adhocImportModel";
 import { overlayPendingAnswers } from "../../../../../data/answers/overlayPendingAnswers";
-import { usePendingAnswerCount } from "../../../../../data/answers/usePendingAnswerCount";
 import {
   loadOrDeriveDistributionCurrentStrictForRead,
   readDistributionLogStamp,
@@ -47,6 +46,7 @@ import {
 } from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
+import { assignUndistributedCases } from "../../../../../data/referral/assignUndistributed";
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -130,11 +130,14 @@ import {
 } from "./XrayReferrals/columnPreset";
 import { computePersonalStats } from "./XrayReferrals/personalStats";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
+import { MoveCasesButton } from "./XrayReferrals/MoveCasesButton";
+import { isUndistributedEntry, undistributedEntries } from "./XrayReferrals/undistributedEntries";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
 import { useReplacementFlow } from "./XrayReferrals/useReplacementFlow";
 import QueueSplitResizer from "./XrayReferrals/QueueSplitResizer";
+import PendingAnswersBanner from "./XrayReferrals/PendingAnswersBanner";
 import PendingCorrections from "./XrayReferrals/PendingCorrections";
 import { DEFAULT_QUEUE_SPLIT } from "../../../../../data/preferences/queueSplitStore";
 import "./XrayReferrals/XrayReferrals.css";
@@ -142,23 +145,6 @@ import "./XrayReferrals/XrayReferrals.css";
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const COL_KEY = "xray_ref_cols_v4";
-
-/** «N answers not yet sent» notice with a "send now" action; renders nothing at 0. */
-function PendingAnswersBanner({ directoryHandle, username, month }: {
-  directoryHandle: DirectoryHandleLike; username: string; month: string;
-}): ReactElement | null {
-  const L = useLabels();
-  const unsent = usePendingAnswerCount({ username, month });
-  if (unsent <= 0) return null;
-  return (
-    <p className="ew-msg-warn" role="status" dir="rtl">
-      {L.ew_answers_pending_sync.replace("{count}", String(unsent))}{" "}
-      <button type="button" onClick={() => requestAnswerFlush(directoryHandle, username, { immediate: true })}>
-        {L.ew_answers_send_now}
-      </button>
-    </p>
-  );
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -325,8 +311,10 @@ function createRenderCell(deps: {
    *  instead of reading against the wrong (active) template's field ids. */
   templatesById?: ReadonlyMap<string, TemplateSchema>;
   labels: Labels;
+  /** `${xrayImageId}::${assignee}` keys submitted on this device but not yet on the share. */
+  unsyncedKeys?: ReadonlySet<string>;
 }) {
-  const { selectedIds, toggleSelect, answersMap, stageMappings, template, templatesById, labels: L } = deps;
+  const { selectedIds, toggleSelect, answersMap, stageMappings, template, templatesById, labels: L, unsyncedKeys } = deps;
   return function renderCell(
     col: DataTableCol<DistributionEntry>,
     entry: DistributionEntry,
@@ -370,9 +358,10 @@ function createRenderCell(deps: {
       );
     }
     if (col.id === "answerStatus") {
-      const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
+      const key = `${entry.xrayImageId}::${entry.assignedTo}`;
+      const answer = answersMap.get(key);
       const rowTemplate = templatesById ? resolveTemplateForAnswer(answer, templatesById, template) : template;
-      return <StatusBadge answer={answer} entryStatus={entry.status} template={rowTemplate} labels={L} />;
+      return <StatusBadge answer={answer} entryStatus={entry.status} template={rowTemplate} labels={L} unsynced={unsyncedKeys?.has(key)} />;
     }
     const raw = col.id === "stage"
       ? formatStageLabel(entry.row.stage, stageMappings)
@@ -467,11 +456,14 @@ export function createSaveAnswerHandler(deps: {
   setDirtyEntryId: (id: string | null) => void;
   /** A1: remember this successful submit so a stale in-flight reload cannot downgrade it. */
   recordLocalSubmission: (item: ItemAnswer) => void;
+  /** Marks (`true`) or clears (`false`) a row as submitted on this device but
+   *  not yet on the share, so its badge reads «قيد الحفظ» instead of «مكتملة». */
+  markUnsynced?: (key: string, unsynced: boolean) => void;
 }) {
   const {
     directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission,
+    ownBroadcastRef, setDirtyEntryId, recordLocalSubmission, markUnsynced,
   } = deps;
   return async function handleSave(
     entry: DistributionEntry, ans: FieldAnswer[]
@@ -530,6 +522,7 @@ export function createSaveAnswerHandler(deps: {
               : { templateId: activeTpl.templateId },
           });
         recordLocalSubmission(item);
+        markUnsynced?.(`${xrayImageId}::${forUser}`, savedLocallyOnly);
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
           item,
@@ -862,6 +855,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selTplId, setSelTplId]     = useState("");
   const [activeTpl, setActiveTpl]   = useState<TemplateSchema | null>(null);
   const [answers, setAnswers]       = useState<ItemAnswer[]>([]);
+  // Rows submitted on this device whose answer is not on the share yet («قيد الحفظ»).
+  const [unsyncedKeys, setUnsyncedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const markUnsynced = useCallback((key: string, unsynced: boolean) => setUnsyncedKeys((prev) => {
+    if (prev.has(key) === unsynced) return prev;
+    const next = new Set(prev);
+    if (unsynced) next.add(key); else next.delete(key);
+    return next;
+  }), []);
   // Every template actually referenced by a loaded answer, keyed by templateId
   // (active template included) -- not just the single active selection. A
   // template swap (Template Builder "delete old, add new") mints fresh field
@@ -1028,7 +1029,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // they narrow `scopedEntries`, and their counts are taken over the same set,
   // so the numbers always add up to the queue the reader is looking at. All of
   // it lives in ./XrayReferrals/caseFilter.ts (predicate, counts, state hook).
-  const caseFilter = useCaseFilter(scopedEntries);
+  // «تم فحصها / لم تُفحص»: completed, or the assignee submitted an answer.
+  const isStudied = useMemo(() => {
+    const submitted = new Set<string>();
+    for (const answer of answers) {
+      if (answer.status === "submitted") submitted.add(`${answer.xrayImageId}::${answer.answeredBy}`);
+    }
+    return (entry: DistributionEntry) =>
+      entry.status === "completed" || submitted.has(`${entry.xrayImageId}::${entry.assignedTo}`);
+  }, [answers]);
+  const caseFilter = useCaseFilter(scopedEntries, isStudied);
   const displayEntries = caseFilter.entries;
 
   const selEntry = useMemo(
@@ -1318,9 +1328,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 return null;
               }),
           canSeeAll ? null : loadEmployeeAnswers(directoryHandle, selMonth, username),
-          // This employee's submitted-but-unsent answers (local IndexedDB). Must
-          // never fail the load: absence just means "nothing to overlay".
-          canSeeAll ? [] : loadPendingAnswerItems(selMonth, username).catch((): ItemAnswer[] => []),
+          // This user's submitted-but-unsent answers (local IndexedDB). Must
+          // never fail the load: absence just means "nothing to overlay". Read
+          // for oversight users too: their OWN rows submit through the same
+          // outbox, and skipping the overlay made a queued answer vanish from
+          // the queue on the next reload until the background flush landed it.
+          // Ad-hoc rows answer into their own `adhoc-*` store, not `selMonth`, so
+          // their queued answers must be overlaid too — reading `selMonth` alone
+          // turned every unsent ad-hoc answer white on the next sync reload.
+          loadPendingAnswerRecords(username)
+            .then((records) => records
+              .filter((r) => r.month === selMonth || r.month.startsWith(ADHOC_MONTH_FOLDER_PREFIX))
+              .map((r) => r.item))
+            .catch((): ItemAnswer[] => []),
         ]));
 
       // Both helpers already scope to `username` (fromEmployee / employeeUsername),
@@ -1345,13 +1365,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // distinct color instead (see rowStatusClass below, wired into
         // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
         // remains a real filter.
+        // Oversight also sees the month's undistributed sample rows («غير موزعة»).
+        const shown = canSeeAll ? [...all, ...undistributedEntries(sample, all)] : all;
         setAllEntries(all);
-        setEntries(canSeeAll ? all : all.filter((e) => e.assignedTo === username));
+        setEntries(canSeeAll ? shown : all.filter((e) => e.assignedTo === username));
         setPendingReferralIds(pendingReferralIds);
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
         setMyQuota(quota);
-        setAnswers(localSubmissions.settle(overlayPendingAnswers(answerItems, pendingItems), loadGeneration));
+        const overlaid = overlayPendingAnswers(answerItems, pendingItems);
+        // A pending item that won the overlay is still only on this device.
+        const winners = new Set(overlaid);
+        setUnsyncedKeys(new Set(pendingItems.filter((p) => winners.has(p)).map((p) => `${p.xrayImageId}::${p.answeredBy}`)));
+        setAnswers(localSubmissions.settle(overlaid, loadGeneration));
         setLoadState("ready");
       };
 
@@ -1532,7 +1558,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const handleSave = createSaveAnswerHandler({
     directoryHandle, username, role, activeTpl, selMonth,
     canSubmitAnswers, canAnswerOnBehalf, setAnswers, setStatusMsg,
-    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record,
+    ownBroadcastRef: ownAnswerBroadcastRef, setDirtyEntryId, recordLocalSubmission: localSubmissions.record, markUnsynced,
   });
 
   // Both reopen handlers live at module scope (createReopenHandlers, above) to
@@ -1600,8 +1626,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // per store rather than refusing the mixed case: a request is per-folder
       // by construction. The old per-row referral path rejected such a
       // selection outright, which is a worse answer than splitting it.
+      // «غير موزعة» rows have no owner to ask: an admin assigns them directly
+      // (a first assignment, as the distribution screen does), audited below.
+      // Anyone else cannot route them at all, so they are skipped, not sent.
+      const undistributedIds = new Set(entries.filter(isUndistributedEntry).map((e) => e.xrayImageId));
+      const toAssign = role === "admin" ? reassignModal.xrayImageIds.filter((id) => undistributedIds.has(id)) : [];
+      let assignedTotal = 0;
+      if (toAssign.length > 0) {
+        const assigned = await assignUndistributedCases(directoryHandle, selMonth, toAssign, toEmployee, username);
+        if (!assigned.ok) {
+          setReassignError(assigned.error);
+          return;
+        }
+        assignedTotal = assigned.assigned;
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "distribution-bulk-assigned",
+          monthFolderName: selMonth,
+          target: toEmployee,
+          details: { samples: assignedTotal, source: "queue-bulk-assign-undistributed" },
+        });
+      }
       const byFolder = new Map<string, string[]>();
       for (const id of reassignModal.xrayImageIds) {
+        if (undistributedIds.has(id)) continue;
         const folder = folderForRow(id);
         const bucket = byFolder.get(folder);
         if (bucket) bucket.push(id);
@@ -1633,6 +1682,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
 
       const requestedTotal = createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
+      if (requestedTotal === 0 && assignedTotal > 0) {
+        setReassignModal(null);
+        clearSelection();
+        setStatusMsg({ type: "ok", text: getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) });
+        await loadData({ silent: true });
+        return;
+      }
       if (requestedTotal === 0) {
         setReassignError("لا توجد عينات مؤهلة للإحالة ضمن هذا التحديد.");
         return;
@@ -1655,11 +1711,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const requestCountText = createdRequests.length > 1
         ? ` (${createdRequests.length} طلبات — طلب لكل موظف مصدر)`
         : "";
+      const assignedPrefix = assignedTotal > 0
+        ? getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) + " "
+        : "";
       setStatusMsg({
         type: "ok",
-        text: skippedTotal > 0
+        text: assignedPrefix + (skippedTotal > 0
           ? `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف. تم تخطي ${skippedTotal} عينة.`
-          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`,
+          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`),
       });
       // Silent — follows an already-successful write, not a month/user change;
       // must refresh the queue in place rather than flashing the loading state.
@@ -1677,7 +1736,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
-  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, templatesById, labels: L });
+  const renderCell = createRenderCell({ selectedIds, toggleSelect, answersMap, stageMappings, template: activeTpl, templatesById, labels: L, unsyncedKeys });
 
   // ── Custom filter override for answerStatus ────────────────────────────────
   // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
@@ -1707,7 +1766,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       </PageHeader>
 
-      {!canSeeAll && <PendingAnswersBanner directoryHandle={directoryHandle} username={username} month={selMonth} />}
+      <PendingAnswersBanner directoryHandle={directoryHandle} username={username} />
 
       {/* Scoped to the DataTable's currently filtered rows (not `allEntries`), so
           export/bulk-reopen act only on what the applied filters show. */}
@@ -1874,13 +1933,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
-                <XrQueueToolbarExtras
-                  canSeeAll={canSeeAll}
-                  scopeEmployee={scopeEmployee}
-                  scopeOptions={scopeOptions}
-                  totalCount={entries.length}
-                  onChangeScope={setScopeEmployee}
-                />
+                <>
+                  <XrQueueToolbarExtras
+                    canSeeAll={canSeeAll}
+                    scopeEmployee={scopeEmployee}
+                    scopeOptions={scopeOptions}
+                    totalCount={entries.length}
+                    onChangeScope={setScopeEmployee}
+                  />
+                  <MoveCasesButton
+                    directoryHandle={directoryHandle}
+                    month={selMonth}
+                    caseFilter={caseFilter.value}
+                    entries={filteredTableEntries}
+                    isStudied={isStudied}
+                    username={username}
+                    role={role}
+                    onDone={() => { void loadData(); }}
+                  />
+                </>
               }
             />
             {/* Second grid column: the sticky panel and the empty-state placeholder both live in this one placed track. */}

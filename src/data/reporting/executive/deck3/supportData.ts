@@ -129,7 +129,7 @@ export function buildDeckSupportSheets(model: ReportModel, opts: { hasDecisionTa
       const sum = zeroPairs();
       for (const c of pairsByStage.values()) for (const k of Object.keys(sum) as Array<keyof Pairs>) sum[k] += c[k];
       add("مصفوفة النتائج", "نتائج المستويين في المجتمع", "عدد الصور في كل تركيبة من نتيجة المستوى الأول ونتيجة المستوى الثاني (الكلمة الأولى = المستوى الأول).", [
-        ["المستوى", "الإجمالي (صورة)", "سليمة – سليمة", "سليمة – سليمة %", "اشتباه – سليمة", "اشتباه – سليمة %", "سليمة – اشتباه", "سليمة – اشتباه %", "اشتباه – اشتباه", "اشتباه – اشتباه %", "أخرى", "أخرى %"],
+        ["المستوى", "الإجمالي (صورة)", "سليمة - سليمة", "سليمة - سليمة %", "اشتباه - سليمة", "اشتباه - سليمة %", "سليمة - اشتباه", "سليمة - اشتباه %", "اشتباه - اشتباه", "اشتباه - اشتباه %", "أخرى", "أخرى %"],
         ...model.population.byStage.map((st): SupportCell[] => pairRow(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
         pairRow("الإجمالي", sum),
       ]);

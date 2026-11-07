@@ -14,6 +14,7 @@ import { useLabels } from "../../../../data/labels/useLabels";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./StorageSection.css";
+import { downloadText } from "../../../../utils/downloadFile";
 
 type Estimate = { usage: number; quota: number } | null;
 
@@ -31,17 +32,8 @@ function persistenceLabelKey(state: PersistenceState) {
   return "storage_persistence_denied" as const;
 }
 
-/** Same blob+anchor download pattern as `data/debug/demoDebugReport.ts`'s `downloadJson`. */
 function downloadAnswerTimings(): void {
-  const blob = new Blob([answerTimingsToJson()], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `answer-timings-${new Date().toISOString().slice(0, 10)}.json`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  downloadText(answerTimingsToJson(), `answer-timings-${new Date().toISOString().slice(0, 10)}.json`);
 }
 
 export function StorageSection() {

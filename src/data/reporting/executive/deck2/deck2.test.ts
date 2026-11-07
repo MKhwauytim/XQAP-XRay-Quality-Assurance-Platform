@@ -585,9 +585,9 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `        <td>0.0%</td>\n` +
     `      </tr></tbody>\n` +
     `      <tfoot><tr>\n` +
-    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
+    `        <td></td><td>الإجمالي</td><td>-</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr><tr class="v2-lg-footnote"><td colspan="7">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
+    `      </tr><tr class="v2-lg-footnote"><td colspan="7">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت - الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
     `  </div></div></div><div class="v2-variant-panel" `;
@@ -677,10 +677,10 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const start = html.indexOf('data-variant-index="1"');
     const end = html.indexOf('data-variant-index="2"');
     const panel1 = html.slice(start, end);
-    expect(panel1).toContain('<span class="v2-level-row-num neutral">—</span>');
+    expect(panel1).toContain('<span class="v2-level-row-num neutral">-</span>');
     // The وزن العينة cell falls back to "—", never a borrowed level's real
     // number.
-    expect(panel1).toContain("<td>—</td>");
+    expect(panel1).toContain("<td>-</td>");
   });
 });
 
@@ -805,7 +805,7 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
   // 1 sea) fixture. This is the regression tripwire for this task: variant 0
   // (production) must never change while variants 1-3 are added alongside it.
   const EXPECTED_VARIANT0 =
-    `<section class="slide v2" id="slide-port-population-1" data-title="مجتمع صور الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">\n` +
+    `<section class="slide v2" id="slide-port-population-1" data-title="مجتمع صور الفحص" data-section="section1" data-section-label="القسم 1 - مجتمع الفحص">\n` +
     `  <div class="slide-controls">\n` +
     `    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">\n` +
     `    <input type="checkbox" checked/>\n` +
@@ -820,7 +820,7 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     `  <div class="slide-inner">\n` +
     `    <div class="slide-eyebrow">\n` +
     `      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span>\n` +
-    `      <span>القسم 1 — مجتمع الفحص</span>\n` +
+    `      <span>القسم 1 - مجتمع الفحص</span>\n` +
     `    </div>\n` +
     `    <div class="slide-headline">مجتمع صور الفحص لشهر مايو 2026</div>\n` +
     `    <div class="slide-subhead" data-edit="منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>\n` +
@@ -897,7 +897,7 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     expect(panel2).toContain("v2-bf-port-population");
     // Both ports have total=1, so land's "منفذ أ" wins the stable sort (first inserted).
     expect(panel2).toContain('<div class="v2-bf-lede-figure gold">1</div>');
-    expect(panel2).toContain("أعلى منفذ: منفذ أ — 1 صورة");
+    expect(panel2).toContain("أعلى منفذ: منفذ أ - 1 صورة");
     // Base tier (only 2 ports; nowhere near the compact-tier threshold) keeps the support strip.
     expect(panel2).toContain("v2-totals-band");
   });
@@ -1055,7 +1055,7 @@ describe("P0 primitives — characterization: slide-port-population-1 Ledger/Bri
     `data-variant-index="2"><div class="v2-sys-brief v2-bf-port-population">
     <div class="v2-bf-lede">
       <div class="v2-bf-lede-figure gold">1</div>
-      <div class="v2-bf-lede-label">أعلى منفذ: منفذ أ — 1 صورة</div>
+      <div class="v2-bf-lede-label">أعلى منفذ: منفذ أ - 1 صورة</div>
       <div class="v2-bf-lede-basis">جميع منافذ الصفحة (منفذان) · إجمالي 2 صورة</div>
     </div>
     <div class="v2-totals-band">
@@ -1080,10 +1080,10 @@ describe("P0 primitives — characterization: slide-port-population-1 Ledger/Bri
   const EXPECTED_PANEL3_GRID =
     `data-variant-index="3"><div class="v2-sys-grid v2-gd-port-population"><div class="v2-gd-split"><div class="v2-gd-panel land">
     <div class="v2-gd-panel-head"><b>المنافذ البرية</b><span>1 منفذ</span></div>
-    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ أ</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ أ</th><td>1</td><td>1</td><td>0</td><td>0</td></tr></tbody></table></figure></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ أ</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ أ</th><td>1</td><td>1</td><td>0</td><td>0</td></tr></tbody></table></figure></div>
   </div><div class="v2-gd-panel sea">
     <div class="v2-gd-panel-head"><b>المنافذ البحرية</b><span>1 منفذ</span></div>
-    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البحرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ ب</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">100</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البحرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ ب</th><td>1</td><td>0</td><td>1</td><td>100</td></tr></tbody></table></figure></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البحرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0-100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ ب</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">100</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البحرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ ب</th><td>1</td><td>0</td><td>1</td><td>100</td></tr></tbody></table></figure></div>
   </div></div></div></div></div></div>
   </div>
   <div class="v2-page-foot" dir="ltr">06 / 20</div>
@@ -1170,8 +1170,8 @@ describe("briefingRankList — bars:false (2026-07-28 review fix regression, no 
   // flex:1 1 auto element (the track) just left dead space. Guards both the
   // track omission (already true) and the new no-bars hook + its CSS rule.
   const items = [
-    { label: "أولاً", value: null, valueText: "—", secondaryText: "تعريف أول" },
-    { label: "ثانياً", value: null, valueText: "—", secondaryText: "تعريف ثانٍ" },
+    { label: "أولاً", value: null, valueText: "-", secondaryText: "تعريف أول" },
+    { label: "ثانياً", value: null, valueText: "-", secondaryText: "تعريف ثانٍ" },
   ];
 
   it("omits .v2-bf-rank-track entirely", () => {
@@ -1183,7 +1183,7 @@ describe("briefingRankList — bars:false (2026-07-28 review fix regression, no 
       foldRemainder: (folded) => ({
         label: `بقية (${folded.length})`,
         value: null,
-        valueText: "—",
+        valueText: "-",
         secondaryText: "",
         rest: true,
       }),
@@ -1200,7 +1200,7 @@ describe("briefingRankList — bars:false (2026-07-28 review fix regression, no 
       foldRemainder: (folded) => ({
         label: `بقية (${folded.length})`,
         value: null,
-        valueText: "—",
+        valueText: "-",
         secondaryText: "",
         rest: true,
       }),
@@ -1218,7 +1218,7 @@ describe("briefingRankList — bars:false (2026-07-28 review fix regression, no 
       foldRemainder: (folded) => ({
         label: `بقية (${folded.length})`,
         value: null,
-        valueText: "—",
+        valueText: "-",
         secondaryText: "",
         rest: true,
       }),
@@ -1263,7 +1263,7 @@ describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §
     {
       title: "القسم الثاني",
       goal: "جودة الصور ودقة القرارات.",
-      range: "04–10",
+      range: "04-10",
       iconName: "gauge",
       tone: "coral",
       figure: "90%",
@@ -1272,7 +1272,7 @@ describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §
     {
       title: "القسم الثالث",
       goal: "تحاليل معمّقة.",
-      range: "11–13",
+      range: "11-13",
       iconName: "chart",
       tone: "purple",
       figure: "5",
@@ -1388,7 +1388,7 @@ describe("slide-glossary-levels fan-out — Ledger/Briefing/Grid (2026-07-25 fan
     // block above) — both must read identically, not two different captions
     // for the same fact.
     const SHARED_FOOTNOTE =
-      "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%";
+      "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت - الأساسان مختلفان ولا يجمعان إلى 100%";
     expect(panel1).toContain(`<tr class="v2-lg-footnote"><td colspan="5">${SHARED_FOOTNOTE}</td></tr>`);
     const model = buildReportModel(input([popRow({ stage: "المستوى الأول" })]));
     const riskStagesHtml = riskStagesSlide(model, 5, 20, true);

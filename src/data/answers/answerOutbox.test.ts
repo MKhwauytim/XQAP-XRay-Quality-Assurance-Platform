@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installFreshIndexedDb } from "../../test-utils/freshIndexedDb";
 import { countUnsentAnswers } from "./answerLocalMirror";
 import {
-  __resetAnswerOutboxForTests, getAnswerSubmitMode, requestAnswerFlush, setAnswerSubmitMode, submitAnswerLocalFirst,
+  __resetAnswerOutboxForTests, flushAnswersNow, getAnswerSubmitMode, requestAnswerFlush, setAnswerSubmitMode, submitAnswerLocalFirst,
 } from "./answerOutbox";
 
 const item = { xrayImageId: "A", templateId: "t", templateVersion: 1, answers: [], lastSavedAt: "2026-10-13T10:00:00.000Z",
@@ -46,5 +46,15 @@ describe("answerOutbox", () => {
     await vi.waitFor(() => expect(replay).toHaveBeenCalledTimes(1));
     requestAnswerFlush({} as never, "u1", { immediate: true, replay });
     await vi.waitFor(() => expect(replay).toHaveBeenCalledTimes(2));
+  });
+
+  it("flushAnswersNow resolves with the pass's summary and cancels a pending debounced flush", async () => {
+    const summary = { replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 2, blocked: { "month-closed": { count: 2, months: ["m"] } } };
+    const debounced = vi.fn(async () => summary);
+    requestAnswerFlush({} as never, "u1", { replay: debounced, debounceMs: 20 });
+    const replay = vi.fn(async () => summary);
+    await expect(flushAnswersNow({} as never, "u1", replay)).resolves.toEqual(summary);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(debounced).not.toHaveBeenCalled();
   });
 });

@@ -37,7 +37,7 @@ describe("CertScanPortsModal (C2)", () => {
     const onSave = vi.fn();
     render(<CertScanPortsModal portCatalog={CATALOG} selectedPorts={["منفذ قديم"]} onSave={onSave} onClose={() => {}} />);
 
-    expect(screen.getByText("محددة سابقاً — غير موجودة في ملف هذا الشهر")).toBeInTheDocument();
+    expect(screen.getByText("محددة سابقاً — غير موجودة في البيانات الحالية")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "منفذ قديم" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "حفظ" }));
     expect(onSave).toHaveBeenCalledWith(["منفذ قديم"]);

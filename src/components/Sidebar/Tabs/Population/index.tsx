@@ -1160,7 +1160,7 @@ export default function PopulationTab() {
       const username = sessionRef.current?.username ?? "unknown";
       const drawResult = drawSample(
         population.preparedRows,
-        { rngSeed: sampleSeed, samplingRules: config.samplingRules, stageMappings: config.stageMappings },
+        { rngSeed: sampleSeed, samplingRules: config.samplingRules, stageMappings: config.stageMappings, priorityPorts: config.priorityPorts },
         username
       );
 
@@ -1556,6 +1556,7 @@ export default function PopulationTab() {
         onSampleSeedChange={setSampleSeed}
         certScanPortRows={riskWorkbookResult?.rows ?? populationProcessingResult?.preparedRows}
         canEditCertScanPorts={canConfigureSample && canMutate("configure-sample")}
+        directoryHandle={directoryHandle}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
           biFileName: biFileNamesLabel,

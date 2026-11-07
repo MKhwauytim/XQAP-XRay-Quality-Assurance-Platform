@@ -13,6 +13,7 @@
  */
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { isBlankResult } from "../population/imageResult";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { ensureMonthWritable } from "../population/monthLock";
@@ -87,17 +88,21 @@ function isSuspicion(value: string | null | undefined): boolean {
 /**
  * Prior-month suspicion rate (B4) — share (0..1) of rows whose `xrayLevelTwoResult`
  * is a suspicion. Mirrors how the executive model aggregates the level-two result.
- * Returns `null` for an empty row set (no signal to report).
+ * Returns `null` for an empty row set (no signal to report). A row whose
+ * level-two result is not recorded yet ("", v159.3) is neither suspicious nor
+ * clean, so it is left out of the denominator too.
  */
 export function computeSuspicionRate(
   rows: Array<Pick<PreparedPopulationRow, "xrayLevelTwoResult">>
 ): number | null {
-  if (rows.length === 0) return null;
+  let recorded = 0;
   let suspicious = 0;
   for (const row of rows) {
+    if (isBlankResult(row.xrayLevelTwoResult)) continue;
+    recorded += 1;
     if (isSuspicion(row.xrayLevelTwoResult)) suspicious += 1;
   }
-  return suspicious / rows.length;
+  return recorded === 0 ? null : suspicious / recorded;
 }
 
 /**

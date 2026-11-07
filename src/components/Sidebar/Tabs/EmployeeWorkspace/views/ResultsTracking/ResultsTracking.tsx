@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import { useLabels } from "../../../../../../data/labels/useLabels";
-import { parseMonthFolderName, formatMonthFolderShortLabel } from "../../../../../../data/population/monthFolder";
+import { parseMonthFolderName } from "../../../../../../data/population/monthFolder";
 import {
   buildTracking,
+  dateOfDay,
   dayTotals,
   finishedThroughDay,
   isWorkDay,
   monthTotals,
   quotaOnDay,
-  resolveTrackingMonthFolder,
   type EmployeeTracking,
   type TrackingRow,
 } from "../../../../../../data/tracking/deadlineTracking";
@@ -64,17 +64,11 @@ type TableRow = {
 };
 
 export default function ResultsTracking({
-  monthFolder: sampleMonthFolder, rows, assignedAtByUser, directoryHandle, canEditDeadline, username, now,
+  monthFolder, rows, assignedAtByUser, directoryHandle, canEditDeadline, username, now,
 }: Props) {
   const L = useLabels();
   const clock = now ?? new Date();
   const dayStart = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate()).getTime();
-  // The calendar follows the month the work is actually dated in, so a sample
-  // attached to another month (January sample, October work) is not all zeros.
-  const monthFolder = useMemo(
-    () => resolveTrackingMonthFolder(sampleMonthFolder, rows, new Date(dayStart)),
-    [sampleMonthFolder, rows, dayStart],
-  );
   const info = parseMonthFolderName(monthFolder);
   const [override, setOverride] = useState<MonthDeadlineOverride | null>(null);
   const [emp, setEmp] = useState("all");
@@ -111,10 +105,12 @@ export default function ResultsTracking({
   }
 
   const t = tracking;
-  const todayDay = clock.getFullYear() === t.year && clock.getMonth() === t.month - 1 ? clock.getDate() : 0;
+  // The calendar spans the whole follow-up period (first distribution → last
+  // study), which may run months past the sample's own month.
+  const todayDay = t.asOfDay > 0 && dateOfDay(t, t.asOfDay).getTime() === dayStart ? t.asOfDay : 0;
   const selected: readonly EmployeeTracking[] =
     emp === "all" ? t.employees : t.employees.filter((e) => e.username === emp);
-  const dayLabel = (d: number) => dayDate.format(new Date(t.year, t.month - 1, d));
+  const dayLabel = (d: number) => dayDate.format(dateOfDay(t, d));
   const hasDay = selectedDay > 0;
   const future = hasDay && selectedDay > t.asOfDay;
   const dash = "—";
@@ -210,14 +206,21 @@ export default function ResultsTracking({
   });
 
   const unplaced = selected.reduce((n, e) => n + e.unplaced, 0);
-  const monthLabel = formatMonthFolderShortLabel(monthFolder);
+  const periodLabel = fill(L.tracking_period_range, {
+    start: shortDate.format(t.periodStart), end: shortDate.format(t.periodEnd),
+  });
+  const periodSummary = fill(L.tracking_period_summary, {
+    start: fullDate.format(t.periodStart), end: fullDate.format(t.periodEnd), days: t.periodDays,
+  });
+  const periodOpen = selected.some((e) => e.assigned > e.completed + e.hold);
   const deadlineIsCustom = resolved.source === "override" && resolved.override !== null;
 
   const cells = [];
   for (let i = 0; i < t.leadBlanks; i += 1) {
     cells.push(<div key={`b${i}`} className="trk-cell trk-cell--blank" aria-hidden="true" />);
   }
-  for (let d = 1; d <= t.daysInMonth; d += 1) {
+  for (let d = 1; d <= t.calendarDays; d += 1) {
+    const date = dateOfDay(t, d);
     const weekend = !isWorkDay(t, d);
     const dt = dayTotals(t, selected, d);
     // Friday/Saturday are greyed but employees do work them: they show real
@@ -246,7 +249,7 @@ export default function ResultsTracking({
         onClick={() => setSelectedDay((cur) => (cur === d ? 0 : d))}
       >
         <span className="trk-cell-top">
-          <span className="trk-cell-day">{d}</span>
+          <span className="trk-cell-day">{date.getDate() === 1 || d === 1 ? shortDate.format(date) : date.getDate()}</span>
           <span className="trk-cell-tag">
             {d === t.deadlineDay
               ? L.tracking_cell_deadline
@@ -324,7 +327,7 @@ export default function ResultsTracking({
                     className="trk-input"
                     type="date"
                     min={formatDeadlineDate(new Date(t.year, t.month - 1, 1))}
-                    max={formatDeadlineDate(new Date(t.year, t.month - 1, t.daysInMonth))}
+                    max={formatDeadlineDate(new Date(t.year, t.month, 0))}
                     value={draft}
                     onChange={(e) => { setDraft(e.target.value); setError(""); }}
                   />
@@ -369,6 +372,10 @@ export default function ResultsTracking({
         </div>
       </div>
 
+      <div className="trk-note trk-period" role="note">
+        {periodSummary} {periodOpen ? L.tracking_period_open : L.tracking_period_closed}
+      </div>
+
       <div className="trk-tiles">
         {tiles.map((tile) => (
           <div className="trk-tile" key={tile.label}>
@@ -381,7 +388,7 @@ export default function ResultsTracking({
 
       <section className="trk-card">
         <div className="trk-cal-head">
-          <h2 className="trk-h">{fill(L.tracking_calendar_title, { month: monthLabel })}</h2>
+          <h2 className="trk-h">{fill(L.tracking_calendar_title, { month: periodLabel })}</h2>
           <div className="trk-legend">
             <span><i className="trk-swatch trk-swatch--completed" />{L.tracking_legend_completed}</span>
             <span><i className="trk-swatch trk-swatch--hold" />{L.tracking_legend_hold}</span>

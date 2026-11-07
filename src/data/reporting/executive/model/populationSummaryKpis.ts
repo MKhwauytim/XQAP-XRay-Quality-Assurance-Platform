@@ -69,7 +69,7 @@ export function applyPopulationSummary(
   for (const p of summary.byPort) {
     if (!portByName.has(p.name)) {
       portByName.set(p.name, {
-        portName: p.name, population: 0, clean: 0, suspicious: 0, suspicionRate: 0, sampleSize: 0, coverage: 0,
+        portName: p.name, population: 0, clean: 0, suspicious: 0, otherResults: 0, suspicionRate: 0, sampleSize: 0, coverage: 0,
         studied: 0, completionRate: 0, accuracyByImage: null, suspiciousDetectionRateByImage: null,
         missedSuspicionRateByImage: null, status: "insufficient",
       });

@@ -3,7 +3,7 @@ import type { EmployeePortRestriction } from "../population/populationConfig";
 
 /** Matches the fallback used everywhere else a row's port is grouped/displayed. */
 export const UNSPECIFIED_PORT = "غير محدد";
-const UNCATEGORIZED_PORT_TYPE = "غير مصنّف";
+export const UNCATEGORIZED_PORT_TYPE = "غير مصنّف";
 
 /** A row's port name, normalized the same way everywhere eligibility is checked. */
 export function normalizePortName(portName: string | null): string {
@@ -62,5 +62,33 @@ export function derivePortCatalog(rows: readonly PortCatalogRow[]): PortCatalogC
         .map(([portName, rowCount]) => ({ portName, rowCount }))
         .sort((a, b) => b.rowCount - a.rowCount),
     }))
+    .sort((a, b) => a.category.localeCompare(b.category, "ar"));
+}
+
+/** A port seen in an earlier month's sample (see `loadKnownPorts`). */
+export type KnownPort = { portName: string; portType: string | null; rowCount: number };
+
+/**
+ * `catalog` (this month's rows) plus every known port it does not already
+ * list, under that port's own type, so a port picker can show every port the
+ * workspace has seen BEFORE this month's file is uploaded or processed. A port
+ * already in `catalog` keeps this month's category and count; a known-only
+ * port shows the row count of the latest month it appeared in. Same ordering
+ * as `derivePortCatalog`.
+ */
+export function mergeKnownPorts(catalog: PortCatalogCategory[], known: readonly KnownPort[]): PortCatalogCategory[] {
+  const listed = new Set(catalog.flatMap((category) => category.ports.map((port) => port.portName)));
+  const categories = new Map(catalog.map((category) => [category.category, [...category.ports]]));
+  for (const port of known) {
+    const portName = normalizePortName(port.portName);
+    if (listed.has(portName)) continue;
+    listed.add(portName);
+    const category = port.portType?.trim() || UNCATEGORIZED_PORT_TYPE;
+    const ports = categories.get(category) ?? [];
+    ports.push({ portName, rowCount: port.rowCount });
+    categories.set(category, ports);
+  }
+  return [...categories.entries()]
+    .map(([category, ports]) => ({ category, ports: ports.sort((a, b) => b.rowCount - a.rowCount) }))
     .sort((a, b) => a.category.localeCompare(b.category, "ar"));
 }

@@ -218,3 +218,25 @@ describe("executive report data", () => {
     expect(kpis.overallAccuracy).toBeNull();
   });
 });
+
+describe("blank L1/L2 results (v159.3 Excel cases)", () => {
+  it("keep the case in the report as «نتائج أخرى», never clean or suspicious, with no accuracy", () => {
+    const populationRows = [row("XR-1"), row("XR-2", { xrayLevelOneResult: "", xrayLevelTwoResult: "" })];
+    const rows = buildExecutiveReportRows({
+      monthFolderName: "6-June-2026",
+      populationRows,
+      sample: sample(populationRows),
+      distribution: null,
+      template,
+      employeeFiles: [answerFile([item("XR-2", "submitted", [{ fieldId: "result", value: "اشتباه" }])])],
+      config: DEFAULT_EXEC_CONFIG,
+    });
+    const blank = rows.find((r) => r.xrayImageId === "XR-2")!;
+    expect(blank.imageResult).toBe("other");
+    expect(blank.verificationCategory).toBeNull();
+    expect(blank.imageResultAccurate).toBeNull();
+    const kpis = calculateExecutiveKPIs(rows, sample(populationRows), DEFAULT_EXEC_CONFIG);
+    expect(kpis.otherResultCount).toBe(1);
+    expect(kpis.cleanCount + kpis.suspiciousCount + kpis.otherResultCount).toBe(2);
+  });
+});

@@ -18,6 +18,12 @@ export type PortAllocation = {
   actualCertScanDrawn: number;
   actualNonCertScanDrawn: number;
   actualTotalDrawn: number;
+  /**
+   * Present (true) only on a stage-path allocation drawn as a high-priority
+   * port (`SampleMasterData.priorityPorts`). Absent everywhere else, so every
+   * pre-"1.3" file and every draw without priority ports keeps its shape.
+   */
+  priority?: true;
 };
 
 export type StageAllocation = {
@@ -161,6 +167,13 @@ export type SampleMasterData = {
    * it has no mappings to record).
    */
   stageMappingsSnapshot?: StageAliasMappings;
+  /**
+   * The high-priority ports this draw ran with ("1.3"): each stage filled its
+   * CertScan and non-CertScan targets from these ports first and drew only the
+   * remainder from the others. Absent when none were selected (and on every
+   * file written before "1.3") — the draw was then the plain apportioned draw.
+   */
+  priorityPorts?: string[];
   /**
    * Ids of rows retired by a replacement — still present in `rows`, but no
    * longer part of the sample under study.

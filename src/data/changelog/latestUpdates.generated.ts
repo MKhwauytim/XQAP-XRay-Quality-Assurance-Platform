@@ -5,73 +5,73 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
-    "version": "v154.1",
-    "date": "2026-10-15",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "الملاحظات والتوصيات rebuilt in the owner's five-theme format, every figure computed from the report data"
-  },
-  {
-    "version": "v154.0",
-    "date": "2026-10-14",
+    "version": "v159.19",
+    "date": "2026-11-07",
     "bucket": "feature",
-    "scope": "answers",
-    "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
-  },
-  {
-    "version": "v153.34",
-    "date": "2026-10-14",
-    "bucket": "enhancement",
     "scope": "deck3",
-    "title": "cover wording, swapped coverage KPIs, one terminology for coverage/agreement, one observation per page (v153.34)"
+    "title": "automated الملاحظات والتوصيات from data-triggered observation types"
   },
   {
-    "version": "v153.33",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "one land/sea rule per port, error rates on their own bases, labelled marking base, defined agreement weights, «عادي» image quality = «متوسط»"
-  },
-  {
-    "version": "v153.32",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "statements",
-    "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
-  },
-  {
-    "version": "v153.31",
-    "date": "2026-10-14",
-    "bucket": "enhancement",
-    "scope": "statements",
-    "title": "compare each port with one fixed baseline per port type (إجمالي), not the rest of its type"
-  },
-  {
-    "version": "v153.30",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "bake the saved text template into the defaults, drop the s3 contents tail, lower «المحددات»"
-  },
-  {
-    "version": "v153.29",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "report import",
-    "title": "rows only from the examined-sample workbook; follow-up and بعد التعديل enrich by id, «نعم» + same exam month first"
-  },
-  {
-    "version": "v153.28",
-    "date": "2026-10-13",
-    "bucket": "enhancement",
-    "scope": "deck3",
-    "title": "align level determinants, drop two captions, empty pages print-off by default"
-  },
-  {
-    "version": "v153.27",
-    "date": "2026-10-13",
+    "version": "v159.17",
+    "date": "2026-11-07",
     "bucket": "feature",
-    "scope": "integrity",
-    "title": "admin boot scan heals live files from a verified .tmp/.bak"
+    "scope": "reporting",
+    "title": "v159.17 Jeddah port report source, recommendations and 2025-vs-2026 comparison"
+  },
+  {
+    "version": "v159.16",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
+  },
+  {
+    "version": "v159.15",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "reporting",
+    "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
+  },
+  {
+    "version": "v159.14",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "reporting",
+    "title": "blank L1/L2 results are never counted as «سليمة»"
+  },
+  {
+    "version": "v158.0",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "catalog and slide picks"
+  },
+  {
+    "version": "v157.0",
+    "date": "2026-11-06",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "report engine core, milestone 1"
+  },
+  {
+    "version": "v159.12",
+    "date": "2026-11-04",
+    "bucket": "fix",
+    "scope": "referrals",
+    "title": "bulk assign includes undistributed cases (832 filtered, 407 offered)"
+  },
+  {
+    "version": "v159.11",
+    "date": "2026-11-01",
+    "bucket": "feature",
+    "scope": "referrals",
+    "title": "admin queue lists undistributed sample cases as «غير موزعة»"
+  },
+  {
+    "version": "v159.10",
+    "date": "2026-11-01",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "Excel report says whether an existing case is distributed"
   }
 ];

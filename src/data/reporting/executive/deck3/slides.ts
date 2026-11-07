@@ -59,7 +59,7 @@ const CLASSIFICATION = "سري";
 const DEPARTMENT = "إدارة الرقابة على الامتثال في المنافذ الجمركية";
 
 const EYEBROW_S1 = "القسم الأول - مجتمع الفحص والعيّنة";
-const EYEBROW_S2 = "القسم الثاني — نتائج فحص الجودة";
+const EYEBROW_S2 = "القسم الثاني - نتائج فحص الجودة";
 const EYEBROW_S3 = "القسم الثالث - الملاحظات والتوصيات";
 
 export type StatementPriority = "عالية" | "متوسطة" | "للعلم";
@@ -397,7 +397,7 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
   if (completedOnly) {
     const ceLabels = getLabels();
     return {
-      eyebrowS2: withPopulation ? EYEBROW_S2 : "القسم الأول — نتائج فحص الجودة",
+      eyebrowS2: withPopulation ? EYEBROW_S2 : "القسم الأول - نتائج فحص الجودة",
       eyebrowS3: withPopulation ? EYEBROW_S3 : "القسم الثاني - الملاحظات والتوصيات",
       kpiTitle: "المؤشرات الرئيسية",
       kpiEyebrow: "خلاصة التقرير",
@@ -415,7 +415,7 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
       s2FootLead: "النتائج العامة",
       s3Ghost: withPopulation ? "03" : "02",
       s3Kicker: withPopulation ? "القسم الثالث" : "القسم الثاني",
-      levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا التقرير",
+      levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة - الخطان المتقطعان متوسطا التقرير",
       engineEmpty: "لا توجد صور مستهدفة من محرك المخاطر في العيّنات المكتملة.",
       closingLine: "نرحّب بالملاحظات والأسئلة على نتائج التقرير.",
     };
@@ -429,21 +429,21 @@ function deck3Copy(completedOnly: boolean, monthlyTarget: number, completedTotal
     coverKicker: "عرض تنفيذي · تقرير شهري",
     coverPeriodLabel: "فترة الدراسة (عيّنة شهر)",
     weightLines: [
-      "وزن السحب: 100% — حصر كامل لمجتمع المستوى",
-      `وزن السحب: 40% من حصة العدد الثابت — ${fixedShare(0.4)} صورة`,
-      `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
-      `وزن السحب: 30% من حصة العدد الثابت — ${fixedShare(0.3)} صورة`,
+      "وزن السحب: 100% - حصر كامل لمجتمع المستوى",
+      `وزن السحب: 40% من حصة العدد الثابت - ${fixedShare(0.4)} صورة`,
+      `وزن السحب: 30% من حصة العدد الثابت - ${fixedShare(0.3)} صورة`,
+      `وزن السحب: 30% من حصة العدد الثابت - ${fixedShare(0.3)} صورة`,
     ],
     highlightValue: fmtNum(monthlyTarget),
     highlightTitle: "العيّنة المستهدفة الأساسية شهريًا (صورة)",
-    highlightNote: "أوزان المستويات الثاني–الرابع تُسحب من هذا العدد (40% + 30% + 30%)؛ المستوى الأول حصر كامل من مجتمعه خارج هذه الحصة.",
+    highlightNote: "أوزان المستويات الثاني-الرابع تُسحب من هذا العدد (40% + 30% + 30%)؛ المستوى الأول حصر كامل من مجتمعه خارج هذه الحصة.",
     s2Ghost: "02",
     s2Kicker: "القسم الثاني",
     s2Description: "دقة النتائج وتحديد موقع الاشتباه والاشتباهات الفائتة على مستوى الشهر والمنافذ والمستويات.",
     s2FootLead: "النتائج العامة للشهر",
     s3Ghost: "03",
     s3Kicker: "القسم الثالث",
-    levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة — الخطان المتقطعان متوسطا الشهر",
+    levelsChartNote: "الأعمدة بنفس أرقام صفحة دقة الرصد العامة - الخطان المتقطعان متوسطا الشهر",
     engineEmpty: "لا توجد صور مستهدفة من محرك المخاطر في عيّنة هذا الشهر.",
     closingLine: "نرحّب بالملاحظات والأسئلة على نتائج الشهر والتقرير.",
   };
@@ -481,8 +481,8 @@ function populationByLevelInner(model: ReportModel, withPop: boolean): string {
         : `${esc(s.stageLabel)}: 100% من مجتمعه = ${fmtNum(s.target ?? s.population)} صورة`;
     });
   const popNote = withPop
-    ? `<div class="v3-pop-note"><p>نسبة التغطية من المستهدف = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
-    : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى — لكل مستوى هدف مختلف.</p>`;
+    ? `<div class="v3-pop-note"><p>التغطية الرقابية = العيّنة المفحوصة ÷ المستهدف.</p><ul class="v3-pop-bullets">${levelLines.map((l) => `<li>${l}</li>`).join("")}</ul></div>`
+    : `<p class="v3-pop-note">الاختيار عشوائي داخل حصة كل مستوى؛ ولا يعكس حجم الحصة أهمية المستوى - لكل مستوى هدف مختلف.</p>`;
   return `${contentHead({ eyebrow: EYEBROW_S1, title: "مجتمع الفحص والعيّنة حسب المستوى", large: true })}
 <div class="v3-pop-grid">
 <div class="v3-pop-stats">
@@ -556,7 +556,7 @@ function populationResultsInner(model: ReportModel, s: NonNullable<ReportModel["
   const matrixHtml = hasPairs
     ? `<h3 class="v3-sub-title">مصفوفة النتائج <small>الكلمة الأولى = نتيجة المستوى الأول، والثانية = نتيجة المستوى الثاني</small></h3>
 ${dataTable({
-        headers: ["المستوى", "الإجمالي", "سليمة – سليمة", "اشتباه – سليمة", "سليمة – اشتباه", "اشتباه – اشتباه", "أخرى"],
+        headers: ["المستوى", "الإجمالي", "سليمة - سليمة", "اشتباه - سليمة", "سليمة - اشتباه", "اشتباه - اشتباه", "أخرى"],
         rows: model.population.byStage.map((st) => pairCells(st.stageLabel, pairsByStage.get(st.stageKey) ?? zeroPairs())),
         totals: pairCells("الإجمالي", sumPairs),
         firstColWidth: 26,
@@ -716,16 +716,16 @@ export async function buildDeck3Slides(
     hideEyebrow: true,
     title: "محتويات التقرير",
     rows: coNoPop ? [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03-04" },
       { index: 2, title: kpiTitle, description: "خلاصة أرقام العيّنات المكتملة في صفحة واحدة.", pages: "ص 05" },
-      { index: 3, title: eyebrowS2, description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 4, title: eyebrowS3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 3, title: eyebrowS2, description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}-${pad2(s2End)}` },
+      { index: 4, title: eyebrowS3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}-${pad2(s3End)}` },
     ] : [
-      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03–04" },
+      { index: 1, title: "المعجم", description: "تعريف مستويات المخاطر والمصطلحات المستخدمة في التقرير.", pages: "ص 03-04" },
       { index: 2, title: withPop ? kpiTitle : "مؤشرات الشهر", description: withPop ? "نتائج الأداء بالأرقام خلال فترة التقرير" : "خلاصة أرقام الشهر في صفحة واحدة.", pages: "ص 05" },
-      { index: 3, title: EYEBROW_S1, description: sectionDesc.s1, pages: `ص ${pad2(6)}–${pad2(s1End)}` },
-      { index: 4, title: "القسم الثاني — نتائج فحص الجودة", description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}–${pad2(s2End)}` },
-      { index: 5, title: EYEBROW_S3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}–${pad2(s3End)}` },
+      { index: 3, title: EYEBROW_S1, description: sectionDesc.s1, pages: `ص ${pad2(6)}-${pad2(s1End)}` },
+      { index: 4, title: "القسم الثاني - نتائج فحص الجودة", description: sectionDesc.s2, pages: `ص ${pad2(s2Start)}-${pad2(s2End)}` },
+      { index: 5, title: EYEBROW_S3, description: sectionDesc.s3, pages: `ص ${pad2(s3Start)}-${pad2(s3End)}` },
     ],
     meta: meta("contents", "المحتويات"),
   }));
@@ -958,7 +958,7 @@ ${kpiBand([
       { label: "الاشتباهات الفائتة", value: fmtNum(t.missedSuspicion), valueTone: "red", aside: `${fmtPct(pct(t.missedSuspicion, overallStats.cleanResults))} من إجابات السليمة`, sub: MISSED_SUSPICION_DEFINITION },
       { label: "الاشتباهات الخاطئة", value: fmtNum(t.falseSuspicion), valueTone: "gold", aside: `${fmtPct(pct(t.falseSuspicion, overallStats.suspResults))} من إجابات الاشتباه`, sub: FALSE_SUSPICION_DEFINITION },
     ], "solo", true)}
-<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر — نسبة الفائتة بين قوسين من إجابات السليمة، ونسبة الخاطئة من إجابات الاشتباه، في كل مستوى</div>
+<div class="v3-note" style="margin-top:18px;font-weight:700;color:var(--v3-navy);">الإجابات حسب مستويات المخاطر - نسبة الفائتة بين قوسين من إجابات السليمة، ونسبة الخاطئة من إجابات الاشتباه، في كل مستوى</div>
 ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "معدل الاتفاق العام", "الاشتباهات الفائتة", "الاشتباهات الخاطئة"], topHeader: [{ label: "", span: 2 }, { label: "النسبة", span: 1, group: true }, { label: "نتائج خاطئة", span: 2, group: true }], groupStart: [2, 3], rows: stageRows, totals })}`;
     parts.push(slideShell(m, "", inner));
   }
@@ -1025,7 +1025,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
     const inner = `${contentHead({
       eyebrow: eyebrowS2,
       title: "دقة إجابات المستوى الأول والثاني",
-      note: "لكل صورة إجابتان مستقلّتان — إجابة لكل مستوى",
+      note: "لكل صورة إجابتان مستقلّتان - إجابة لكل مستوى",
     })}
 <div class="v3-two-col">
   ${panel("land", "المستوى الأول", l1All, l1Missed, otherL1)}
@@ -1095,7 +1095,7 @@ ${dataTable({ headers: ["المستوى", "الإجابات المفحوصة", "
     const unknown = portAcc.unknown.length > 0 ? panel("all", "منافذ غير محددة النوع", totalOf(portAcc.unknown)) : "";
     // The base is NOT every examined image: only suspicion images (اشتباه at L1 or L2) answered on BOTH questions, so
     // its quality split differs from the quality pages (every examined image). Say so on the page.
-    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "متابعة تحديد موقع الاشتباه وجودة الصور", note: "الأساس: صور الاشتباه المفحوصة (اشتباه عند المستوى الأول أو الثاني) التي أُجيب فيها عن التحديد والجودة معًا — لا جميع الصور المفحوصة" })}
+    const inner = `${contentHead({ eyebrow: eyebrowS2, title: "متابعة تحديد موقع الاشتباه وجودة الصور", note: "الأساس: صور الاشتباه المفحوصة (اشتباه عند المستوى الأول أو الثاني) التي أُجيب فيها عن التحديد والجودة معًا - لا جميع الصور المفحوصة" })}
 <div class="v3-two-col">
   ${panel("land", "المنافذ البرية", land)}
   ${panel("sea", "المنافذ البحرية", sea)}${unknown ? `
@@ -1325,7 +1325,7 @@ ${o ? legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "
       targeted === 0
         ? `<div class="v3-engine-band"><div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${copy.engineEmpty}</span></div></div>`
         : `<div class="v3-engine-band">
-  <div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${fmtNum(targeted)} صورة استهدفها المحرك — توافق ${fmtPct(pct(engineAgree, targeted))}</span></div>
+  <div class="v3-engine-head"><b>التوافق مع محرك المخاطر</b><span>${fmtNum(targeted)} صورة استهدفها المحرك - توافق ${fmtPct(pct(engineAgree, targeted))}</span></div>
   <div class="v3-engine-stats">
     <div class="v3-engine-stat"><b>${fmtPct(pct(engineAgree, targeted))}</b><span>اتفق الفحص مع المحرك (${fmtNum(engineAgree)} صورة)</span></div>
     <div class="v3-engine-stat"><b class="v-red">${fmtNum(engineDisagree)}</b><span>صورة خالف فيها الفحص استهداف المحرك</span></div>
@@ -1338,7 +1338,7 @@ ${o ? legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "
     const inner = `${contentHead({
       eyebrow: eyebrowS3,
       title: agreeTitle,
-      note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
+      note: `${fmtNum(imagesTotal)} صور مشتركة - توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
     })}
 <div class="v3-agree-grid">
   <div class="v3-agree-col">
@@ -1350,7 +1350,7 @@ ${o ? legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "
     ], scaleCaption(teamAxis))}
   </div>
   <div class="v3-agree-col">
-    ${chartTitleRow({ title: "التفصيل — الأرقام بين قوسين عدد الصور المتوافقة" })}
+    ${chartTitleRow({ title: "التفصيل - الأرقام بين قوسين عدد الصور المتوافقة" })}
     ${dataTable({ headers: ["الفريق", "الصور", "المستوى الأول", "المستوى الثاني", "الكلي"], rows: teamRows, totals: teamTotals, firstColWidth: 26, topHeader: [{ label: "", span: 2 }, { label: "التوافق", span: 3, group: true }], groupStart: 2 })}
   </div>
 </div>`;
@@ -1360,7 +1360,7 @@ ${o ? legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "
     const inner2 = `${contentHead({
       eyebrow: eyebrowS3,
       title: agreeTitle + YITBA,
-      note: `${fmtNum(imagesTotal)} صور مشتركة — توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
+      note: `${fmtNum(imagesTotal)} صور مشتركة - توافق المستوى الأول ${fmtPct(l1Pooled)} · الثاني ${fmtPct(l2Pooled)}`,
     })}
 ${engineBand}`;
     parts.push(slideShell(m2, "", inner2));

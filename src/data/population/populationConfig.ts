@@ -139,6 +139,14 @@ export type PopulationConfig = {
    * loads as `[]` (see `loadPopulationConfig`), so no migration is needed.
    */
   certScanPorts?: string[];
+  /**
+   * High-priority ports for the sample draw (SAMPLING_ALGORITHM_VERSION "1.3"):
+   * every stage fills its CertScan and non-CertScan targets from these ports
+   * first and draws only the remainder from the others. Same normalized port
+   * names as `certScanPorts`. Additive and optional like it: a config.json
+   * without the field loads as `[]` (no priority — the plain draw).
+   */
+  priorityPorts?: string[];
 };
 
 export const MONTHLY_SAMPLE_TARGET = 6500;
@@ -408,17 +416,18 @@ export const DEFAULT_POPULATION_CONFIG: PopulationConfig = {
   samplingRules: DEFAULT_SAMPLING_RULES,
   employeeAllocations: [],
   employeePortRestrictions: [],
-  certScanPorts: []
+  certScanPorts: [],
+  priorityPorts: []
 };
 
 /**
- * Normalizes a stored `certScanPorts` value (C2): keeps non-blank strings,
+ * Normalizes a stored port-name list (`certScanPorts`, `priorityPorts`): keeps non-blank strings,
  * trimmed (a padded name would never match a row), normalized through
  * `normalizePortName` and de-duplicated in first-seen
  * order. Anything that is not an array (a legacy config without the field,
  * or a hand-edited file) yields `[]`.
  */
-export function normalizeCertScanPorts(value: unknown): string[] {
+export function normalizePortList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const ports = new Set<string>();
   for (const item of value) {
@@ -457,7 +466,8 @@ export async function loadPopulationConfig(
         samplingRules: loaded.samplingRules || DEFAULT_SAMPLING_RULES,
         employeeAllocations: loaded.employeeAllocations || [],
         employeePortRestrictions: loaded.employeePortRestrictions || [],
-        certScanPorts: normalizeCertScanPorts(loaded.certScanPorts)
+        certScanPorts: normalizePortList(loaded.certScanPorts),
+        priorityPorts: normalizePortList(loaded.priorityPorts)
       };
     }
   } catch (error) {

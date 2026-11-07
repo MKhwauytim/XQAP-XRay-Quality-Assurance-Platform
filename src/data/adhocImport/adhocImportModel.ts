@@ -368,6 +368,16 @@ export function namespacedXrayImageId(
     : `ADHOC-${importId}-R${replicaIndex}-${originalXrayImageId}`;
 }
 
+/**
+ * {@link originalXrayImageId} without the import id: matches both
+ * `createImportId` shapes. For de-duplication only, where the import id is
+ * unknown because a merged import's record is archived and gone from the index.
+ */
+export function originalXrayImageIdAnyImport(xrayImageId: string): string {
+  const match = /^ADHOC-adh-(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+-[a-z0-9]+)-(?:R\d+-)?(.+)$/i.exec(xrayImageId);
+  return match ? match[1] : xrayImageId;
+}
+
 /** Prefix of every synthetic ad-hoc store folder under `2-samples/`. */
 export const ADHOC_MONTH_FOLDER_PREFIX = "adhoc-";
 

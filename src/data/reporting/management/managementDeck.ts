@@ -68,7 +68,7 @@ async function managementDeckSlides(m: ManagementModel): Promise<string> {
 
   // 2 — section 1: per stage/level (R3, same ordering as R2).
   slides.push(slide({
-    id: "m-deck-stage", title: "القسم 1 — حسب المستوى", num: 2, total,
+    id: "m-deck-stage", title: "القسم 1 - حسب المستوى", num: 2, total,
     eyebrow: "القسم 1", iconName: "layers",
     headline: "تقدّم الإنجاز حسب المستوى",
     body: m.byStage.length === 0
@@ -80,7 +80,7 @@ async function managementDeckSlides(m: ManagementModel): Promise<string> {
 
   // 3 — section 2: per port.
   slides.push(slide({
-    id: "m-deck-port", title: "القسم 2 — حسب المنفذ", num: 3, total,
+    id: "m-deck-port", title: "القسم 2 - حسب المنفذ", num: 3, total,
     eyebrow: "القسم 2", iconName: "port",
     headline: "تقدّم الإنجاز حسب المنفذ",
     body: m.byPort.length === 0
@@ -91,7 +91,7 @@ async function managementDeckSlides(m: ManagementModel): Promise<string> {
   await yieldToMain();
 
   // 4 — replacement / reassignment activity, with reasons.
-  const reasonItems = m.replacements.byReason.slice(0, 6).map((r) => `${r.reason} — ${fmtNum(r.count)}`);
+  const reasonItems = m.replacements.byReason.slice(0, 6).map((r) => `${r.reason} - ${fmtNum(r.count)}`);
   slides.push(slide({
     id: "m-deck-replacements", title: "الاستبدال وإعادة التعيين", num: 4, total,
     eyebrow: "المساءلة", iconName: "flag",
@@ -127,7 +127,7 @@ export async function buildManagementDeck(
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<string> {
   const empty: DistributionCurrentData = {
-    monthFolderName: input.monthFolderName, derivedAt: "—",
+    monthFolderName: input.monthFolderName, derivedAt: "-",
     totalAssigned: 0, totalCompleted: 0, totalReplaced: 0, totalPending: 0, entries: [],
   };
   const m = computeManagementModel(
@@ -140,9 +140,9 @@ export async function buildManagementDeck(
   const monthLabel = formatMonthLabel(input.monthFolderName);
   return buildDeckViewer({
     slides: await managementDeckSlides(m),
-    docTitle: `عرض الإدارة — ${monthLabel}`,
+    docTitle: `عرض الإدارة - ${monthLabel}`,
     brandTitle: "عرض الإدارة",
-    brandSub: `ضمان جودة الأشعة — ${monthLabel}`,
+    brandSub: `ضمان جودة الأشعة - ${monthLabel}`,
     iconName: "shield",
     footerNote: sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   });

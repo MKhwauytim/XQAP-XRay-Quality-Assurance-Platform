@@ -2,6 +2,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import { stripRawRow } from "../population/populationTypes";
 import { getStageKey, resolveStageMappings, STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../population/stageHelpers";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
+import { normalizePortName } from "../distribution/portEligibility";
 import { hamiltonApportionment } from "./apportionment";
 import { createRng, drawWithoutReplacement, hashSeedString } from "./rng";
 import type {
@@ -22,6 +23,8 @@ type StageConfig = {
   rngSeed: string;
   samplingRules: StageSamplingRule[];
   stageMappings?: StageAliasMappings;
+  /** High-priority ports (`PopulationConfig.priorityPorts`); see {@link drawStage}. */
+  priorityPorts?: readonly string[];
 };
 type DrawCounters = {
   certRequested: number;
@@ -365,73 +368,48 @@ function redistributeStageShortfall(plan: StagePlan): void {
   }
 }
 
-function exactCertTarget(
-  rule: StageSamplingRule,
-  stageRows: PreparedPopulationRow[],
-  portKeys: string[],
-  groups: Map<string, PreparedPopulationRow[]>,
-  portName: string
-): number {
-  const stageCertRows = stageRows.filter((row) => row.certScanStatus === "Certscan");
-  if (stageCertRows.length === 0 || rule.certScanExactCount <= 0) return 0;
-  const apportioned = hamiltonApportionment(
-    portKeys.map((key) => ({
-      key,
-      size: groups.get(key)!.filter((row) => row.certScanStatus === "Certscan").length
-    })),
-    Math.min(rule.certScanExactCount, stageCertRows.length)
-  );
-  return apportioned.find((entry) => entry.key === portName)?.allocated ?? 0;
+/**
+ * The stage's CertScan target as one row count, capped at the stage's CertScan
+ * pool, for both methods. `exact` asks for `certScanExactCount`; `percentage`
+ * rounds ONCE at the stage level (see SAMPLING_ALGORITHM_VERSION "1.2" — before
+ * 2026-08-19 it rounded once per port against each port's own quota and always
+ * broke upward at .5, so ten ports each allocated one seat at a configured 50%
+ * drew 100% CertScan). Capping at the pool means no port is ever asked for more
+ * CertScan rows than it holds; an over-ask is reported at stage level by
+ * `detectStageCertShortfall`.
+ */
+function stageCertTarget(rule: StageSamplingRule, stageTarget: number, stageRows: PreparedPopulationRow[]): number {
+  const pool = stageRows.filter((row) => row.certScanStatus === "Certscan").length;
+  if (pool === 0) return 0;
+  if (rule.certScanMethod === "percentage") {
+    if (rule.certScanPercentage <= 0) return 0;
+    return Math.max(0, Math.min(Math.round((rule.certScanPercentage / 100) * stageTarget), pool));
+  }
+  if (rule.certScanExactCount <= 0) return 0;
+  return Math.min(rule.certScanExactCount, pool);
 }
 
-/**
- * This port's share of the stage's CertScan target for the `percentage` method.
- *
- * Rounding happens ONCE, at the stage level, and the resulting row count is then
- * Hamilton-apportioned across the ports weighted by each port's CertScan pool —
- * the same shape as {@link exactCertTarget}. Before 2026-08-19 the percentage was
- * instead multiplied and `Math.round`ed against each port's own `allocated`
- * quota, so the rounding ran once PER PORT and always broke upward at .5: ten
- * ports each allocated 1 seat at a configured 50% each rounded 0.5 up to 1 and
- * the stage drew 100% CertScan. That also contradicted
- * {@link certScanConfiguredTarget}, the stage-level number Phase 3 shows the user
- * BEFORE the draw. See SAMPLING_ALGORITHM_VERSION "1.2".
- *
- * The stage target is capped at the stage's CertScan pool (again mirroring
- * `exactCertTarget`), so no port is ever asked for more CertScan rows than it
- * holds; an over-ask is reported at stage level by `detectStageCertShortfall`.
- */
-function percentageCertTarget(
-  rule: StageSamplingRule,
-  stageTarget: number,
-  stageRows: PreparedPopulationRow[],
+/** Every port's share of a CertScan row count, Hamilton-apportioned by each port's CertScan pool. */
+function portCertShares(
+  certTarget: number,
   portKeys: string[],
-  groups: Map<string, PreparedPopulationRow[]>,
-  portName: string
-): number {
-  const stageCertRows = stageRows.filter((row) => row.certScanStatus === "Certscan");
-  if (stageCertRows.length === 0 || rule.certScanPercentage <= 0) return 0;
-  const stageCertTarget = Math.min(
-    Math.round((rule.certScanPercentage / 100) * stageTarget),
-    stageCertRows.length
-  );
-  if (stageCertTarget <= 0) return 0;
+  groups: Map<string, PreparedPopulationRow[]>
+): Map<string, number> {
+  if (certTarget <= 0) return new Map();
   const apportioned = hamiltonApportionment(
     portKeys.map((key) => ({
       key,
       size: groups.get(key)!.filter((row) => row.certScanStatus === "Certscan").length
     })),
-    stageCertTarget
+    certTarget
   );
-  return apportioned.find((entry) => entry.key === portName)?.allocated ?? 0;
+  return new Map(apportioned.map((entry) => [entry.key, entry.allocated]));
 }
 
 function stagePortDraw(
   portName: string,
   allocated: number,
-  stageTarget: number,
-  stageRows: PreparedPopulationRow[],
-  portKeys: string[],
+  target: number,
   groups: Map<string, PreparedPopulationRow[]>,
   rule: StageSamplingRule,
   rng: Rng
@@ -439,9 +417,6 @@ function stagePortDraw(
   const portRows = groups.get(portName)!;
   const certRows = portRows.filter((row) => row.certScanStatus === "Certscan");
   const nonCertRows = portRows.filter((row) => row.certScanStatus === "NonCertscan");
-  const target = rule.certScanMethod === "percentage"
-    ? percentageCertTarget(rule, stageTarget, stageRows, portKeys, groups, portName)
-    : exactCertTarget(rule, stageRows, portKeys, groups, portName);
   const certScanQuota = Math.min(allocated, target);
   const actualCertQuota = Math.min(certScanQuota, certRows.length);
   const drawnCert = drawWithoutReplacement(certRows, actualCertQuota, rng);
@@ -494,8 +469,8 @@ function stagePortDraw(
 
 /**
  * Stage-wide CertScan shortfall check (detection only). BOTH CertScan methods
- * cap their target to the stage's whole CertScan pool ({@link exactCertTarget},
- * {@link percentageCertTarget}) *before* per-port apportionment runs, so no
+ * cap their target to the stage's whole CertScan pool ({@link stageCertTarget})
+ * *before* per-port apportionment runs, so no
  * single port's request can exceed its own pool in either path — an over-ask is
  * only visible here, against the stage total.
  *
@@ -530,30 +505,173 @@ function detectStageCertShortfall(
   };
 }
 
-function drawStage(stageRows: PreparedPopulationRow[], target: number, rule: StageSamplingRule, rng: Rng): StageDraw {
-  const groups = groupByPort(stageRows);
+/**
+ * The pre-priority draw over a group of ports: Hamilton by port size, each
+ * port's CertScan share Hamilton by its CertScan pool, then (when `spill`)
+ * any underfill spilled over the group's remaining rows. With every stage row
+ * as the group and the rule's own CertScan target this IS the stage draw, step
+ * for step and RNG call for RNG call, exactly as it was before priority ports.
+ */
+function drawPortGroup(
+  groupRows: PreparedPopulationRow[],
+  target: number,
+  certTarget: number,
+  rule: StageSamplingRule,
+  rng: Rng,
+  spill: boolean
+): { draw: StageDraw; groups: Map<string, PreparedPopulationRow[]> } {
+  const groups = groupByPort(groupRows);
   const portKeys = Array.from(groups.keys());
   const apportioned = hamiltonApportionment(
     portKeys.map((key) => ({ key, size: groups.get(key)!.length })),
     target
   );
-  const rows: PreparedPopulationRow[] = [];
-  const allocations: PortAllocation[] = [];
-  const counters = emptyCounters();
-  const shortfalls: CertScanShortfall[] = [];
-  const stageShortfall = detectStageCertShortfall(rule, stageRows, target);
-  if (stageShortfall) shortfalls.push(stageShortfall);
+  const certShares = portCertShares(certTarget, portKeys, groups);
+  const draw: StageDraw = { rows: [], allocations: [], counters: emptyCounters(), shortfalls: [] };
   for (const entry of apportioned) {
-    const draw = stagePortDraw(entry.key, entry.allocated, target, stageRows, portKeys, groups, rule, rng);
-    rows.push(...draw.rows);
-    allocations.push(draw.allocation);
-    addCounters(counters, draw.counters);
-    if (draw.shortfall) shortfalls.push(draw.shortfall);
+    const port = stagePortDraw(entry.key, entry.allocated, certShares.get(entry.key) ?? 0, groups, rule, rng);
+    draw.rows.push(...port.rows);
+    draw.allocations.push(port.allocation);
+    addCounters(draw.counters, port.counters);
+    if (port.shortfall) draw.shortfalls.push(port.shortfall);
   }
-  const spillover = spillAndReconcile(groups, allocations, rows, target, rng);
-  counters.certActual += spillover.extraCert;
-  counters.nonCertActual += spillover.extraNonCert;
-  return { rows, allocations, counters, shortfalls };
+  if (spill) {
+    const spillover = spillAndReconcile(groups, draw.allocations, draw.rows, target, rng);
+    draw.counters.certActual += spillover.extraCert;
+    draw.counters.nonCertActual += spillover.extraNonCert;
+  }
+  return { draw, groups };
+}
+
+/**
+ * The high-priority ports' part of a stage: up to `certWanted` CertScan and
+ * `nonCertWanted` non-CertScan rows, each type Hamilton-apportioned across the
+ * priority ports by that port's pool of the type. Both counts are already
+ * capped at the priority ports' pools by the caller, so no port is asked for
+ * more of a type than it holds.
+ */
+function drawPriorityPorts(
+  priorityRows: PreparedPopulationRow[],
+  certWanted: number,
+  nonCertWanted: number,
+  rng: Rng
+): { draw: StageDraw; groups: Map<string, PreparedPopulationRow[]> } {
+  const groups = groupByPort(priorityRows);
+  const portKeys = Array.from(groups.keys());
+  const byType = (status: "Certscan" | "NonCertscan", wanted: number): Map<string, number> => {
+    if (wanted <= 0) return new Map();
+    const apportioned = hamiltonApportionment(
+      portKeys.map((key) => ({ key, size: groups.get(key)!.filter((row) => row.certScanStatus === status).length })),
+      wanted
+    );
+    return new Map(apportioned.map((entry) => [entry.key, entry.allocated]));
+  };
+  const certShares = byType("Certscan", certWanted);
+  const nonCertShares = byType("NonCertscan", nonCertWanted);
+  const draw: StageDraw = { rows: [], allocations: [], counters: emptyCounters(), shortfalls: [] };
+  for (const portName of portKeys) {
+    const portRows = groups.get(portName)!;
+    const certRows = portRows.filter((row) => row.certScanStatus === "Certscan");
+    const nonCertRows = portRows.filter((row) => row.certScanStatus === "NonCertscan");
+    const certScanQuota = certShares.get(portName) ?? 0;
+    const nonCertScanQuota = nonCertShares.get(portName) ?? 0;
+    const drawnCert = drawWithoutReplacement(certRows, Math.min(certScanQuota, certRows.length), rng);
+    const drawnNonCert = drawWithoutReplacement(nonCertRows, Math.min(nonCertScanQuota, nonCertRows.length), rng);
+    draw.rows.push(...drawnCert, ...drawnNonCert);
+    addCounters(draw.counters, {
+      certRequested: certScanQuota,
+      nonCertRequested: nonCertScanQuota,
+      certActual: drawnCert.length,
+      nonCertActual: drawnNonCert.length
+    });
+    draw.allocations.push({
+      portName,
+      populationSize: portRows.length,
+      certScanCount: certRows.length,
+      nonCertScanCount: nonCertRows.length,
+      allocatedQuota: certScanQuota + nonCertScanQuota,
+      certScanQuota,
+      nonCertScanQuota,
+      actualCertScanDrawn: drawnCert.length,
+      actualNonCertScanDrawn: drawnNonCert.length,
+      actualTotalDrawn: drawnCert.length + drawnNonCert.length,
+      priority: true
+    });
+  }
+  return { draw, groups };
+}
+
+function countCert(rows: PreparedPopulationRow[]): number {
+  return rows.filter((row) => row.certScanStatus === "Certscan").length;
+}
+
+/**
+ * One stage's draw.
+ *
+ * With no high-priority port among the stage's rows this is the plain draw
+ * ({@link drawPortGroup} over every stage row), unchanged.
+ *
+ * With high-priority ports ("1.3", 2026-10-19, owner request) the stage's
+ * CertScan / non-CertScan split is kept and each type is filled from the
+ * priority ports FIRST: up to the stage's CertScan target from their CertScan
+ * rows, up to the rest of the stage target from their non-CertScan rows. What
+ * they cannot cover is drawn from the other ports exactly the normal way (by
+ * port size, CertScan share by pool). A stage still short after both — a type
+ * ran out everywhere — is topped up from any row left, priority ports first,
+ * then the others.
+ */
+function drawStage(
+  stageRows: PreparedPopulationRow[],
+  target: number,
+  rule: StageSamplingRule,
+  rng: Rng,
+  priorityPorts: ReadonlySet<string>
+): StageDraw {
+  const stageShortfall = detectStageCertShortfall(rule, stageRows, target);
+  const certTarget = stageCertTarget(rule, target, stageRows);
+  const priorityRows = priorityPorts.size > 0
+    ? stageRows.filter((row) => priorityPorts.has(normalizePortName(row.portName)))
+    : [];
+
+  if (priorityRows.length === 0) {
+    const { draw } = drawPortGroup(stageRows, target, certTarget, rule, rng, true);
+    if (stageShortfall) draw.shortfalls.unshift(stageShortfall);
+    return draw;
+  }
+
+  const certWanted = Math.min(certTarget, target);
+  const nonCertWanted = target - certWanted;
+  const priorityCertPool = countCert(priorityRows);
+  const priority = drawPriorityPorts(
+    priorityRows,
+    Math.min(certWanted, priorityCertPool),
+    Math.min(nonCertWanted, priorityRows.length - priorityCertPool),
+    rng
+  );
+
+  const otherRows = stageRows.filter((row) => !priorityPorts.has(normalizePortName(row.portName)));
+  const otherTarget = Math.min(target - priority.draw.rows.length, otherRows.length);
+  const otherCert = Math.min(Math.max(0, certWanted - priority.draw.counters.certActual), countCert(otherRows));
+  const others = drawPortGroup(otherRows, otherTarget, otherCert, rule, rng, false);
+
+  const rows = [...priority.draw.rows, ...others.draw.rows];
+  const counters = emptyCounters();
+  addCounters(counters, priority.draw.counters);
+  addCounters(counters, others.draw.counters);
+  for (const [groups, allocations] of [
+    [priority.groups, priority.draw.allocations],
+    [others.groups, others.draw.allocations]
+  ] as const) {
+    const spillover = spillAndReconcile(groups, allocations, rows, target, rng);
+    counters.certActual += spillover.extraCert;
+    counters.nonCertActual += spillover.extraNonCert;
+  }
+  return {
+    rows,
+    allocations: [...priority.draw.allocations, ...others.draw.allocations],
+    counters,
+    shortfalls: [...(stageShortfall ? [stageShortfall] : []), ...priority.draw.shortfalls, ...others.draw.shortfalls]
+  };
 }
 
 function mergePortAllocations(target: Map<string, PortAllocation>, additions: PortAllocation[]): void {
@@ -663,6 +781,7 @@ export function drawStageSample(
   redistributeStageShortfall(plan);
 
   const rng = createRng(hashSeedString(config.rngSeed));
+  const priorityPorts = new Set(config.priorityPorts ?? []);
   const allRows: PreparedPopulationRow[] = [];
   const portAllocations = new Map<string, PortAllocation>();
   const stageAllocations: StageAllocation[] = [];
@@ -673,7 +792,7 @@ export function drawStageSample(
     const stageRows = rows.filter((row) => plan.rowStageKeys.get(row.xrayImageId) === stageKey);
     const target = plan.effectiveTargets.get(stageKey) ?? 0;
     if (stageRows.length === 0 || target <= 0) continue;
-    const draw = drawStage(stageRows, target, plan.rulesByStage.get(stageKey)!, rng);
+    const draw = drawStage(stageRows, target, plan.rulesByStage.get(stageKey)!, rng, priorityPorts);
     totalRequested += target;
     allRows.push(...draw.rows);
     addCounters(counters, draw.counters);
@@ -681,8 +800,12 @@ export function drawStageSample(
     mergePortAllocations(portAllocations, draw.allocations);
     certScanShortfalls.push(...draw.shortfalls);
   }
-  return successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
+  const result = successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
     allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls,
     { rowCount: plan.unmappedStageRowCount, rawValues: plan.unmappedStageRawValues },
     stageMappingsSnapshot);
+  // Recorded only when set, so a draw without priority ports keeps the exact
+  // file shape it has always had.
+  if (result.ok && priorityPorts.size > 0) result.data.priorityPorts = [...priorityPorts];
+  return result;
 }

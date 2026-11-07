@@ -99,6 +99,12 @@ function ImportPreviewBody({
         <li>{labels.ew_pending_import_summary_changed}: {preview.changes.length.toLocaleString("ar-SA-u-nu-latn")} ({changedIds.size.toLocaleString("ar-SA-u-nu-latn")} حالة)</li>
         <li>{labels.ew_pending_import_summary_unchanged}: {preview.unchangedIds.length.toLocaleString("ar-SA-u-nu-latn")}</li>
         <li>{labels.ew_pending_import_summary_unmatched}: {preview.unmatchedIds.length.toLocaleString("ar-SA-u-nu-latn")}</li>
+        {preview.protectedChanges.length > 0 && (
+          <li>{labels.ew_pending_import_summary_protected}: {preview.protectedChanges.length.toLocaleString("ar-SA-u-nu-latn")}</li>
+        )}
+        {preview.invalidValues.length > 0 && (
+          <li>{labels.ew_pending_import_summary_invalid}: {preview.invalidValues.length.toLocaleString("ar-SA-u-nu-latn")}</li>
+        )}
       </ul>
       {preview.unmatchedIds.length > 0 && (
         <p style={{ fontSize: 12, opacity: 0.8 }}>

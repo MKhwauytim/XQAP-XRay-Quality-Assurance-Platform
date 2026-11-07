@@ -63,7 +63,7 @@ const UNKNOWN_PORT = "غير محدد";
 /** The muted, bar-less cell used wherever a percentage is not honest to show
  *  (no denominator, or below the data-sufficiency cut). Same markup the
  *  section-2 port tables use, so the two pages read identically. */
-const INSUFF_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+const INSUFF_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
 
 export type LevelCounts = {
   correctClean: number;
@@ -230,8 +230,8 @@ function detectionTooltip(row: LevelAccuracyRow): string {
   // missedSuspicion base), NOT `rankable` (accuracy's evaluable base) — a
   // port can clear the accuracy cut while its confirmed-suspicion base stays
   // too thin to publish a detection rate (2026-07-30 fix).
-  const show = (s: LevelStats) => (s.detectionRankable ? fmtPct(s.detection) : "—");
-  return `دقة اكتشاف الاشتباه — المستوى الأول: ${show(row.l1)} · المستوى الثاني: ${show(row.l2)}`;
+  const show = (s: LevelStats) => (s.detectionRankable ? fmtPct(s.detection) : "-");
+  return `دقة اكتشاف الاشتباه - المستوى الأول: ${show(row.l1)} · المستوى الثاني: ${show(row.l2)}`;
 }
 
 function levelTable(
@@ -263,7 +263,7 @@ function levelTable(
   const totalDelta =
     totalL1.accuracy !== null && totalL2.accuracy !== null
       ? deltaSpan(totalL2.accuracy - totalL1.accuracy)
-      : `<span class="insuff">—</span>`;
+      : `<span class="insuff">-</span>`;
   const totalsRow =
     `<tr><td>الإجمالي</td><td>${pctCell(totalL1.accuracy)}</td><td>${pctCell(totalL2.accuracy)}</td>` +
     `<td>${totalDelta}</td><td><span class="v2-lvlacc-n" dir="ltr">${esc(nText(totalL1.evaluable, totalL2.evaluable))}</span></td></tr>`;
@@ -349,7 +349,7 @@ function ledgerLevelTable(
   const totalDelta =
     totalL1.accuracy !== null && totalL2.accuracy !== null
       ? deltaSpan(totalL2.accuracy - totalL1.accuracy)
-      : `<span class="insuff">—</span>`;
+      : `<span class="insuff">-</span>`;
   const totalsRow =
     `<tr><td>الإجمالي</td><td>${pctCell(totalL1.accuracy)}</td><td>${pctCell(totalL2.accuracy)}</td>` +
     `<td>${totalDelta}</td><td><span class="v2-lvlacc-n" dir="ltr">${esc(nText(totalL1.evaluable, totalL2.evaluable))}</span></td></tr>`;
@@ -389,7 +389,7 @@ function briefingLevelRank(landChunk: LevelAccuracyRow[], seaChunk: LevelAccurac
   const combinedAll = [...landChunk, ...seaChunk];
   if (combinedAll.length === 0) {
     return `<div class="v2-sys-brief v2-bf-level-accuracy">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">-</span></div></div>
     </div>`;
   }
 
@@ -433,7 +433,7 @@ function briefingLevelRank(landChunk: LevelAccuracyRow[], seaChunk: LevelAccurac
     rankItems.push({
       label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
     });
     rawForFold.push({
@@ -457,7 +457,7 @@ function briefingLevelRank(landChunk: LevelAccuracyRow[], seaChunk: LevelAccurac
           ? `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`
           : `بقية المنافذ (${fmtNum(folded.length)})`,
         value: delta !== null ? Math.abs(delta) : null,
-        valueText: delta !== null ? signedPointsText(delta) : "—",
+        valueText: delta !== null ? signedPointsText(delta) : "-",
         secondaryText: totL1.evaluable > 0 ? `الأول ${pctCell(totL1.accuracy)} · الثاني ${pctCell(totL2.accuracy)}` : "",
         rest: true,
       };
@@ -466,12 +466,12 @@ function briefingLevelRank(landChunk: LevelAccuracyRow[], seaChunk: LevelAccurac
 
   return `<div class="v2-sys-brief v2-bf-level-accuracy">
     ${briefingLede({
-      figure: pooledDelta !== null ? signedPointsText(pooledDelta) : `<span class="insuff">—</span>`,
+      figure: pooledDelta !== null ? signedPointsText(pooledDelta) : `<span class="insuff">-</span>`,
       tone: "blue",
       label:
         pooledDelta !== null
-          ? `فارق المستويين ${signedPointsText(pooledDelta)} نقطة — الثاني ${pctCell(totalL2.accuracy)} مقابل الأول ${pctCell(totalL1.accuracy)}`
-          : `فارق المستويين — لا تتوفر بيانات كافية للمقارنة`,
+          ? `فارق المستويين ${signedPointsText(pooledDelta)} نقطة - الثاني ${pctCell(totalL2.accuracy)} مقابل الأول ${pctCell(totalL1.accuracy)}`
+          : `فارق المستويين - لا تتوفر بيانات كافية للمقارنة`,
       basis,
     })}
     ${supportStrip}
@@ -598,7 +598,7 @@ export function levelAccuracySlideBuilders(
       return v2Slide({
         id,
         title: `دقة إجابات المستوى الأول والثاني${cont}`,
-        eyebrow: "القسم 3 — التحاليل المتقدمة",
+        eyebrow: "القسم 3 - التحاليل المتقدمة",
         iconName: "layers",
         headline: `دقة إجابات المستوى الأول والثاني${cont}`,
         subhead: "مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.",
@@ -633,8 +633,8 @@ export function levelAccuracySlideBuilders(
  * second rule set. No raw hex literals.
  */
 export const LEVEL_ACCURACY_CSS = `
-/* Section 3 — دقة إجابات المستوى الأول والثاني */
-/* Ledger/Briefing/Grid namespacing hooks (fan-out plan §11b, batch B2b) —
+/* Section 3 - دقة إجابات المستوى الأول والثاني */
+/* Ledger/Briefing/Grid namespacing hooks (fan-out plan §11b, batch B2b) -
    "nothing bespoke beyond the shared components" role, same as every other
    fanned-out page's page-local hook (see theme.ts's .v2-lg-port-sample etc.). */
 .v2-lg-level-accuracy,.v2-bf-level-accuracy,.v2-gd-level-accuracy{height:100%;}

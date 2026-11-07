@@ -158,3 +158,22 @@ describe("readWorkbookTablesFromBuffer", () => {
     }
   });
 });
+
+describe("readWorkbookTablesFromBuffer header row", () => {
+  it("skips a navigation row and a blank row above the real header (operator workbook shape)", () => {
+    const buffer = workbookBuffer({
+      sheet: [
+        ["→ البطاقة", "Q1", "Q2", "Q3"],
+        [],
+        ["الشهر", "STAGE", "رقم صورة الاشعة", "اسم المنفذ", "الحالة"],
+        [1, "FIRST_STAGE", "IMG1", "الوديعة", "متبقية"],
+      ],
+    });
+
+    const [table] = readWorkbookTablesFromBuffer(buffer);
+
+    expect(table.headers).toEqual(["الشهر", "STAGE", "رقم صورة الاشعة", "اسم المنفذ", "الحالة"]);
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0].sourceRowNumber).toBe(4);
+  });
+});

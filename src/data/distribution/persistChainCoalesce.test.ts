@@ -70,6 +70,7 @@ describe("persist retry", () => {
   it("a transient failure is retried once and the derived files still land, without an error entry", async () => {
     clearErrors();
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await getSampleMainDir(root, MONTH, true); // a drawn month: the cache never creates its folder
     setSimulatedFaults(root, fault(Number.POSITIVE_INFINITY));
     // The share heals between the first attempt (which exhausted its own write retries) and the retry.
     __setPersistRetryDelayForTests({ minMs: 5, maxMs: 10, beforeRetry: () => setSimulatedFaults(root, []) });
@@ -84,11 +85,24 @@ describe("persist retry", () => {
     __setPersistRetryDelayForTests({ minMs: 5, maxMs: 10 });
     clearErrors();
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await getSampleMainDir(root, MONTH, true); // a drawn month: the cache never creates its folder
     setSimulatedFaults(root, fault(Number.POSITIVE_INFINITY));
     invalidateMonthLockCache();
     void queueDistributionCurrentPersist(root, MONTH, snap(1, 100));
     await flushPendingDistributionPersist();
     expect(await cacheScanBytes(root)).toBeUndefined();
     expect(getRecentErrors().filter((e) => e.context.includes("distribution:cache-write"))).toHaveLength(1);
+  });
+});
+
+describe("a deleted month is never recreated by the derived cache", () => {
+  it("skips the persist when the month's sample folder is gone, and writes nothing", async () => {
+    clearErrors();
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    void queueDistributionCurrentPersist(root, MONTH, snap(1, 100));
+    await flushPendingDistributionPersist();
+    await expect(getSampleMainDir(root, MONTH, false)).rejects.toMatchObject({ name: "NotFoundError" });
+    expect(getRecentErrors().filter((e) => e.context.includes("distribution:cache-write"))).toHaveLength(0);
   });
 });

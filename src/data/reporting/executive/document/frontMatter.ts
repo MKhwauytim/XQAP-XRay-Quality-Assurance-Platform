@@ -49,7 +49,7 @@ export function buildCover(model: ReportModel, issueDate: string): string {
     <div class="title-block">
       <div class="kicker">نسخة تنفيذية</div>
       <h1>التقرير التنفيذي لضمان جودة الأشعة</h1>
-      <div class="subtitle">دقة قرارات المستوى الأول والثاني — تحليل أمني للجودة</div>
+      <div class="subtitle">دقة قرارات المستوى الأول والثاني - تحليل أمني للجودة</div>
       <div class="rule"></div>
       <p class="lead">فترة التقرير: ${esc(issueDate)}<br>مجتمع الصور محل الدراسة: ${esc(model.summary.periodId)}${populationLine(model)}</p>${scopeNote(model)}
       <div class="level-strip">
@@ -123,8 +123,8 @@ export function buildGlossary(model: ReportModel): string {
   const outcomeLegend = [
     { t: "سليمة صحيحة", d: "قرار سليمة طابق المراجع", icon: "check", tone: "green" },
     { t: "اشتباه صحيح", d: "قرار اشتباه طابق المراجع", icon: "check", tone: "blue" },
-    { t: "اشتباه فائت", d: "قُيّم سليمة والمراجع اشتباه — خطر أمني", icon: "alert", tone: "coral" },
-    { t: "اشتباه خاطئ", d: "قُيّم اشتباه والمراجع سليمة — تكلفة", icon: "flag", tone: "gold" },
+    { t: "اشتباه فائت", d: "قُيّم سليمة والمراجع اشتباه - خطر أمني", icon: "alert", tone: "coral" },
+    { t: "اشتباه خاطئ", d: "قُيّم اشتباه والمراجع سليمة - تكلفة", icon: "flag", tone: "gold" },
   ]
     .map(
       (o) => `<div class="doc-legend-item">
@@ -139,7 +139,7 @@ export function buildGlossary(model: ReportModel): string {
       ${levelCard("المستوى الأول", "stage1", "المفتش الذي يصدر القرار الأولي على الصورة.")}
       ${levelCard("المستوى الثاني", "stage2", "المراجعة المزدوجة لقرار المستوى الأول.")}
       ${levelCard("المراجع (الجودة)", "stage3", "المعيار الذهبي الذي تُقاس عليه دقة المستويين.")}
-      ${levelCard("الفرق الأخرى", "stage4", "اليدوي / المعاكس / الوسائل الحية — دليل مساند فقط.")}
+      ${levelCard("الفرق الأخرى", "stage4", "اليدوي / المعاكس / الوسائل الحية - دليل مساند فقط.")}
     </div>
     <div class="grid grid-2 page-fill" style="margin-top:14px">
       <div class="card doc-panel">
@@ -147,7 +147,7 @@ export function buildGlossary(model: ReportModel): string {
         <div class="table-wrap"><table><thead><tr><th>المؤشر</th><th>طريقة الحساب</th></tr></thead><tbody>
           ${metricRow("دقة الفحص", "(سليمة صحيحة + اشتباه صحيح) ÷ القابل للتقييم")}
           ${metricRow("معدل اكتشاف الاشتباه", "اشتباه صحيح ÷ (صحيح + فائت)")}
-          ${metricRow("الاشتباه الفائت", "فائت ÷ (صحيح + فائت) — الخطر الأعلى")}
+          ${metricRow("الاشتباه الفائت", "فائت ÷ (صحيح + فائت) - الخطر الأعلى")}
           ${metricRow("دقة قرار الاشتباه", "اشتباه صحيح ÷ (صحيح + خاطئ)")}
           ${metricRow("الاشتباه الخاطئ", "خاطئ ÷ (سليمة صحيحة + خاطئ)")}
         </tbody></table></div>
@@ -155,7 +155,7 @@ export function buildGlossary(model: ReportModel): string {
       <div class="card doc-panel">
         <div class="panel-title">دلالات النتائج</div>
         <div class="doc-legend">${outcomeLegend}</div>
-        <div class="info doc-note" style="margin-top:10px"><span class="doc-note-icon">${icon("alert", 16)}</span><span>دلالات كفاية البيانات: 0 لا يُعرض ولا يُرتّب · 1–9 غير كافٍ · 10–19 محدود · 20+ كافٍ. القيم الناقصة تُعرض "—" لا "0%".</span></div>
+        <div class="info doc-note" style="margin-top:10px"><span class="doc-note-icon">${icon("alert", 16)}</span><span>دلالات كفاية البيانات: 0 لا يُعرض ولا يُرتّب · 1-9 غير كافٍ · 10-19 محدود · 20+ كافٍ. القيم الناقصة تُعرض "-" لا "0%".</span></div>
         ${model.dataQuality.inspectorIdentityMapped ? "" : `<div class="info doc-note" style="margin-top:8px"><span class="doc-note-icon">${icon("users", 16)}</span><span>هوية المفتش غير مرتبطة هذه الفترة (لم تتم مطابقة BI).</span></div>`}
       </div>
     </div>`;

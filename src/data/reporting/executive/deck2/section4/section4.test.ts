@@ -184,7 +184,7 @@ describe("buildExecutiveDeckV2 — section 4 end-to-end integration", () => {
     expect(html).toContain('id="slide-sep-4"');
     expect(html).toContain('id="slide-s4-coverage"');
     expect(html).toContain('id="slide-s4-accountability"');
-    expect(html).toContain("القسم الرابع — التغطية والمساءلة التشغيلية");
+    expect(html).toContain("القسم الرابع - التغطية والمساءلة التشغيلية");
 
     const sep4Idx = html.indexOf('id="slide-sep-4"');
     const closingIdx = html.indexOf('id="slide-closing"');

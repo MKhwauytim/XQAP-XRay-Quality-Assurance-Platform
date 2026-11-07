@@ -17,7 +17,7 @@ import { yieldToMain } from "../../storage/yieldToMain";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts, PopulationReportScope } from "./types";
-import { STAGE_LABELS } from "./fold";
+import { otherSuffix, STAGE_LABELS } from "./fold";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import { ZATCA_LOGO_URL } from "../../../branding/organization";
 
@@ -30,7 +30,7 @@ const ORG: OrgBlock = { logoUrl: ZATCA_LOGO_URL, orgName: "ضمان جودة ا�
 function resultRow(label: string, counts: ResultCounts): TableCell[] {
   return [
     { html: esc(label) },
-    { html: fmtNum(counts.total), cls: "v-navy" },
+    { html: fmtNum(counts.total) + esc(otherSuffix(counts)), cls: "v-navy" },
     { html: fmtNum(counts.سليمة), cls: "v-green" },
     { html: fmtNum(counts.اشتباه), cls: "v-red" },
   ];
@@ -55,9 +55,10 @@ function capWithRemainder<T extends { counts: ResultCounts }>(
     (acc, item) => ({
       سليمة: acc.سليمة + item.counts.سليمة,
       اشتباه: acc.اشتباه + item.counts.اشتباه,
+      other: acc.other + item.counts.other,
       total: acc.total + item.counts.total,
     }),
-    { سليمة: 0, اشتباه: 0, total: 0 }
+    { سليمة: 0, اشتباه: 0, other: 0, total: 0 }
   );
   return [
     ...top.map((item) => ({ label: labelOf(item), counts: item.counts })),
@@ -74,10 +75,11 @@ function portBreakdownTwoColumn(breakdown: PortBreakdown): string {
   const padTo = Math.max(landCapped.length, seaCapped.length);
   const rowsFor = (ports: Array<{ label: string; counts: ResultCounts }>) => ports.map((p) => resultRow(p.label, p.counts));
   const totalsFor = (ports: PortBreakdown["land"], label: string) => {
-    const total = { سليمة: 0, اشتباه: 0, total: 0 };
+    const total = { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
     for (const p of ports) {
       total.سليمة += p.counts.سليمة;
       total.اشتباه += p.counts.اشتباه;
+      total.other += p.counts.other;
       total.total += p.counts.total;
     }
     return resultRow(label, total);
@@ -190,7 +192,7 @@ ${tintedPanel({
   title: "بيانات معلومات الأعمال (BI)",
   body: kpiBand(
     model.reconciled.biRawRowCount === null
-      ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "—" } satisfies KpiCell]
+      ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "-" } satisfies KpiCell]
       : [{ label: "إجمالي الصفوف الخام", value: fmtNum(model.reconciled.biRawRowCount) } satisfies KpiCell],
     "solo"
   ),
@@ -199,7 +201,7 @@ ${tintedPanel({
   slides.push(slideShell(meta(4), "", receiptInner));
 
   // 5 — Risk before -> after
-  const riskInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات المخاطر — قبل وبعد" })}
+  const riskInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات المخاطر - قبل وبعد" })}
 ${
   summary
     ? kpiBand(
@@ -225,7 +227,7 @@ ${
         { html: fmtPct(f.fillPercentage) },
       ])
     : [];
-  const biInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات BI — قبل وبعد" })}
+  const biInner = `${contentHead({ eyebrow: "القسم الأول", title: "بيانات BI - قبل وبعد" })}
 ${
   summary && summary.biProvided
     ? `${kpiBand(
@@ -450,7 +452,7 @@ export async function buildPopulationDeckSlides(
       sectionKey = lastSectionKey;
       sectionLabel = lastSectionLabel;
     }
-    return { num, total: totalSlides, sectionKey, sectionLabel, footText: `تقرير المجتمع — ${model.monthLabel}` };
+    return { num, total: totalSlides, sectionKey, sectionLabel, footText: `تقرير المجتمع - ${model.monthLabel}` };
   };
 
   const parts: string[] = [];
@@ -467,7 +469,7 @@ export async function buildPopulationDeckSlides(
       org: ORG,
       kicker: "تقرير المجتمع",
       title: "نهاية التقرير",
-      closingLine: `تقرير المجتمع — ${model.monthLabel}`,
+      closingLine: `تقرير المجتمع - ${model.monthLabel}`,
       metaRows: [],
       meta: meta(totalSlides),
     })

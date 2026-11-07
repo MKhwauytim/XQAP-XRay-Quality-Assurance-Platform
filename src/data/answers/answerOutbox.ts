@@ -4,7 +4,7 @@ import { requestStoragePersistence } from "../storage/storageRegistry";
 import { queueAnswerForLanding } from "./answerLocalMirror";
 import { mintAnswerEventIdentity } from "./answerStorage";
 import { timeAnswerStep } from "./answerTimings";
-import { replayPendingAnswers } from "./pendingAnswerReplay";
+import { replayPendingAnswers, type PendingReplaySummary } from "./pendingAnswerReplay";
 import type { ItemAnswer } from "./answerTypes";
 
 export type AnswerSubmitMode = "outbox" | "sync";
@@ -66,6 +66,23 @@ export function requestAnswerFlush(directoryHandle: DirectoryHandleLike, usernam
   if (opts.immediate) { if (timer) clearTimeout(timer); run(); return; }
   if (timer) clearTimeout(timer);
   timer = setTimeout(run, opts.debounceMs ?? FLUSH_DEBOUNCE_MS);
+}
+
+/**
+ * The «إرسال الآن» button's flush: runs one replay pass NOW and resolves with
+ * its summary, so the button can say what happened. `requestAnswerFlush` is
+ * fire-and-forget and, when a pass is already running, only flags a re-run —
+ * from the button that looked like nothing happened at all. Joins an
+ * in-flight pass in this tab (`replayPendingAnswers`'s own dedupe) rather
+ * than starting a second one.
+ */
+export async function flushAnswersNow(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  replay: typeof replayPendingAnswers = replayPendingAnswers
+): Promise<PendingReplaySummary> {
+  if (timer) { clearTimeout(timer); timer = null; }
+  return replay(directoryHandle, username);
 }
 
 export function __resetAnswerOutboxForTests(): void {
