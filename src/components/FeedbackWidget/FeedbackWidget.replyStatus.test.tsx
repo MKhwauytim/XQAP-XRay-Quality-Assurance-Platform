@@ -113,10 +113,12 @@ describe("FeedbackWidget — reply-status badge, sort and filter", () => {
 
     renderWidgetOpen();
 
-    // The file's first render pays for the widget's lazy imports; under a loaded CI runner that
-    // overran findByText's default 1 s and failed intermittently, so this waits up to 5 s.
-    expect(await screen.findByText("تم الرد", {}, { timeout: 5000 })).toBeInTheDocument();
-    expect(await screen.findByText("بانتظار الرد", {}, { timeout: 5000 })).toBeInTheDocument();
+    // «تم الرد» / «بانتظار الرد» are also the labels of the status filter buttons, which render
+    // once the list has loaded; matching only the ticket badges keeps the query unambiguous
+    // (an unscoped findByText failed with "Found multiple elements" when both were on screen).
+    const badge = { selector: ".fb-msg-badge" };
+    expect(await screen.findByText("تم الرد", badge, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText("بانتظار الرد", badge, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("sorts the newest reply to the top even though its ticket was opened first", async () => {
