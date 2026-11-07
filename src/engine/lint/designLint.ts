@@ -117,7 +117,7 @@ const HAS_LETTER = /\p{L}/u;
 function f5(slide: LayoutSlide, theme: ThemeTokens): EngineIssue[] {
   const toned = (c: string): boolean => c.toLowerCase() === theme.tones.good.toLowerCase() || c.toLowerCase() === theme.tones.bad.toLowerCase();
   const title = `s${slide.index}-title`;
-  const words = (self: LayoutBox, visualId: string, names: string[]): TextBox[] =>
+  const words = (self: BarChartBox | TextBox, visualId: string, names: string[]): TextBox[] =>
     slide.boxes.filter((t): t is TextBox =>
       t.kind === "text" && t !== self && t.id !== title && t.visualId !== visualId && HAS_LETTER.test(boxText(t)) &&
       !names.includes(boxText(t)) && near(self, t));
