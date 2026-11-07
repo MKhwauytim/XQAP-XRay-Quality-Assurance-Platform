@@ -601,6 +601,20 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     return out;
   }, [rows, template, templatesById]);
 
+  // The follow-up period starts at the month's first distribution: each
+  // employee's earliest `assigned` event, or their quota stamp when earlier.
+  const trackingAssignedAt = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = { ...assignedAtByUser };
+    const ms = (iso: string | undefined) => (iso ? Date.parse(iso) : NaN);
+    for (const event of auditEvents) {
+      if (event.eventType !== "assigned" || !event.assignedTo) continue;
+      const at = ms(event.eventAt);
+      const cur = ms(out[event.assignedTo]);
+      if (!Number.isNaN(at) && (Number.isNaN(cur) || at < cur)) out[event.assignedTo] = event.eventAt;
+    }
+    return out;
+  }, [assignedAtByUser, auditEvents]);
+
   const answerFields = useMemo(
     () => mergeTemplateFields(templatesById),
     [templatesById]
@@ -883,7 +897,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
           key={selectedMonth}
           monthFolder={selectedMonth}
           rows={trackingRows}
-          assignedAtByUser={assignedAtByUser}
+          assignedAtByUser={trackingAssignedAt}
           directoryHandle={directoryHandle}
           canEditDeadline={role === "admin"}
           username={username}

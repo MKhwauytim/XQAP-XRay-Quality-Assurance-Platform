@@ -123,12 +123,38 @@ describe("ResultsTracking", () => {
     );
     const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell");
     expect(cells[LEAD + 5 - 1].textContent).toContain("6");
-    expect(cells[LEAD + 14 - 1].className).toContain("trk-cell--today");
   });
 
   it("marks today and the deadline day on the calendar", () => {
     const { cell } = mount(true);
     expect(cell(14).className).toContain("trk-cell--today");
     expect(cell(28).className).toContain("trk-cell--deadline");
+  });
+
+  it("an October sample still studied in November shows the whole period on the calendar and in the summary", () => {
+    const spanRows = rows([
+      ["completed", "2026-10-05T10:00:00", 3],
+      ["completed", "2026-11-03T10:00:00", 7], // Tuesday, after the month and deadline
+      ["pending", null, 5],
+    ]);
+    const { container } = render(
+      <ResultsTracking
+        monthFolder="10-october-2026"
+        rows={spanRows}
+        assignedAtByUser={{ emp1: "2026-10-01T08:00:00" }}
+        directoryHandle={createMemoryDirectory()}
+        canEditDeadline={false}
+        username="admin"
+        now={new Date(2026, 10, 4)}
+      />,
+    );
+    const cells = container.querySelectorAll<HTMLButtonElement>(".trk-cell:not(.trk-cell--blank)");
+    // First study Oct 5 → last study Nov 3: 30 days, not running on to today (Nov 4).
+    expect(cells).toHaveLength(30);
+    expect(cells[29].textContent).toContain("7");
+    const period = container.querySelector(".trk-period")?.textContent ?? "";
+    expect(period).toContain("30 يومًا");
+    expect(period).toContain("نوفمبر");
+    expect(period).toContain("ما زالت هناك حالات متبقية");
   });
 });

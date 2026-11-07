@@ -19,6 +19,20 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "report engine core, milestone 1"
   },
   {
+    "version": "v159.5",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "tracking",
+    "title": "follow-up period runs from first to last studied case"
+  },
+  {
+    "version": "v159.2",
+    "date": "2026-11-01",
+    "bucket": "enhancement",
+    "scope": "tracking",
+    "title": "daily follow-up spans first distribution to last study, across months"
+  },
+  {
     "version": "v159.1",
     "date": "2026-11-01",
     "bucket": "enhancement",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "reporting",
     "title": "normal hyphen instead of long dashes in report text"
-  },
-  {
-    "version": "v156.0",
-    "date": "2026-10-19",
-    "bucket": "fix",
-    "scope": "distribution",
-    "title": "damaged distribution.current.json rebuilds silently; deleted months stay deleted; admin delete-month tool"
-  },
-  {
-    "version": "v155.0",
-    "date": "2026-10-19",
-    "bucket": "feature",
-    "scope": "sampling",
-    "title": "high-priority ports in the sample draw; port pickers list every known port before upload"
   }
 ];
