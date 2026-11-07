@@ -20,6 +20,7 @@ import { getLabels } from "../../../../data/labels/labelsStore";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import KpiDashboard from "./KpiDashboard";
+import DailyWorkReportCard from "./DailyWorkReportCard";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { usePermissions } from "../../../../auth/usePermissions";
@@ -942,6 +943,12 @@ function ReportsContent() {
             {renderExportControls("executive", "rh-btn-teal")}
           </div>
         </div>
+
+        <DailyWorkReportCard
+          directoryHandle={directoryHandle}
+          disabled={!canExportReports}
+          disabledTitle={exportDisabledTitle()}
+        />
 
         {/* Population report — merges the former Sample + Distribution cards (D11) */}
         <div className={cardClassFor("population-report")}>

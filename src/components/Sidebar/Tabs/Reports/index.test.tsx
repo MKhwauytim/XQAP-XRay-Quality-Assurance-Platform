@@ -755,8 +755,10 @@ describe("Reports hub — only the executive report is live", () => {
     expect(screen.queryByText("التصميم الجديد")).toBeNull();
     expect(screen.queryByLabelText("تخصيص التصميم")).toBeNull();
 
-    const paused = Array.from(container.querySelectorAll(".rh-card")).filter((c) => c !== executive);
+    const paused = Array.from(container.querySelectorAll(".rh-card")).filter((c) => c !== executive && c.getAttribute("data-testid") !== "rh-daily-work-card");
     expect(paused.length).toBe(3);
+    // The daily work email card is live, not paused.
+    expect(screen.getByTestId("rh-daily-work-card")).not.toHaveClass("rh-card-maintenance");
     paused.forEach((card) => {
       expect(card).toHaveClass("rh-card-maintenance");
       expect(card.querySelector(".rh-badge-maintenance")).toHaveTextContent("تحت الصيانة");

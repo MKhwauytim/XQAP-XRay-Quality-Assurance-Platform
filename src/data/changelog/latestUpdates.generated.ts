@@ -5,6 +5,20 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v158.0",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "catalog and slide picks"
+  },
+  {
+    "version": "v157.0",
+    "date": "2026-11-06",
+    "bucket": "feature",
+    "scope": "engine",
+    "title": "report engine core, milestone 1"
+  },
+  {
     "version": "v156.1",
     "date": "2026-11-01",
     "bucket": "enhancement",
@@ -59,19 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "answers",
     "title": "per-assignee answer folders, admin-offered migration with archived originals, automatic compaction (v154.0)"
-  },
-  {
-    "version": "v153.33",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "deck3",
-    "title": "one land/sea rule per port, error rates on their own bases, labelled marking base, defined agreement weights, «عادي» image quality = «متوسط»"
-  },
-  {
-    "version": "v153.32",
-    "date": "2026-10-14",
-    "bucket": "fix",
-    "scope": "statements",
-    "title": "observation figures on one line — short labels, single-row grid; level observation shows the weighted معدل الاتفاق العام"
   }
 ];
