@@ -191,6 +191,8 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-kpi-label{font-size:28px;color:var(--v3-muted);}
 .v3-kpi-band.compact .v3-kpi-label{font-size:27px;font-weight:500;}
 .v3-kpi-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;}
+/* A unit (e.g. «صورة») on the same line as its number. */
+.v3-kpi-row.inline{flex-direction:row;align-items:baseline;gap:14px;}
 .v3-kpi-value{font-size:96px;font-weight:700;color:var(--v3-navy);line-height:1;}
 .v3-kpi-band.bottom .v3-kpi-value{font-size:76px;}
 .v3-kpi-band.compact .v3-kpi-value{font-size:56px;}
@@ -251,28 +253,44 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
 .v3-sub-title small{font-size:20px;font-weight:400;color:var(--v3-muted);}
 .v3-pop-bullets{margin:8px 0 0;padding-inline-start:34px;list-style:disc;}
 .v3-pop-bullets li{margin:2px 0;}
-/* Observations and recommendations table: same border system as every table (2px navy frame, 1px hairlines), figures on their own row. */
-.v3-obs{width:100%;border-collapse:collapse;table-layout:fixed;}
-.v3-obs th{font-size:25px;color:var(--v3-muted);font-weight:500;text-align:right;padding:10px 0 10px 14px;border-top:2px solid var(--v3-navy);border-bottom:1px solid var(--v3-hair);}
-.v3-obs th:nth-child(1){width:7%;}
-.v3-obs th:nth-child(2){width:55%;}
-.v3-obs th:nth-child(3){width:38%;}
-.v3-obs td{vertical-align:top;padding:14px 0 14px 18px;border-bottom:1px solid var(--v3-hair);}
-.v3-obs td+td{border-inline-start:1px solid var(--v3-hair);padding-inline-start:22px;}
-.v3-obs tbody tr:last-child td{border-bottom:2px solid var(--v3-navy);}
-.v3-obs-num{font-size:38px;font-weight:700;line-height:1.2;}
-.v3-obs-num.red{color:var(--v3-red);}
-.v3-obs-num.gold{color:var(--v3-gold);}
-.v3-obs-num.navy{color:var(--v3-navy);}
-.v3-obs-text{display:block;font-size:26px;line-height:1.5;color:var(--v3-navy);}
+/* One-observation page: three fixed-width panels (main observation | supporting facts | recommendations) that stretch to
+   the slide's free height, so every observation page has the same frame and only the text inside changes length. */
+.v3-obs-card{flex:1;min-height:0;display:grid;grid-template-columns:24fr 48fr 28fr;gap:24px;}
+.v3-obs-panel{display:flex;flex-direction:column;min-height:0;border:1px solid var(--v3-hair);border-top:4px solid var(--v3-navy);}
+.v3-obs-panel.red{border-top-color:var(--v3-red);}
+.v3-obs-panel.gold{border-top-color:var(--v3-gold);}
+.v3-obs-panel.blue{border-top-color:var(--v3-blue);}
+.v3-obs-panel h3{margin:0;padding:18px 28px;font-size:28px;font-weight:600;color:var(--v3-navy);background:var(--v3-panel);border-bottom:1px solid var(--v3-hair);}
+.v3-obs-body{flex:1;min-height:0;overflow:hidden;padding:30px 28px;}
+.v3-obs-card .v3-fig small{font-size:20px;white-space:normal;overflow:visible;}
+.v3-obs-card .v3-fig b{font-size:32px;}
+.v3-obs-text{display:block;font-size:30px;line-height:1.55;color:var(--v3-navy);}
 .v3-obs-rec .v3-obs-text{color:var(--v3-text);}
+.v3-obs-title{font-size:54px;font-weight:700;line-height:1.4;}
+/* The main observation sits in the middle of its panel; facts and recommendations read from the top. */
+.v3-obs-main .v3-obs-body{display:flex;align-items:center;}
+.v3-obs-title.red{color:var(--v3-red);}
+.v3-obs-title.gold{color:var(--v3-gold);}
+.v3-obs-title.blue{color:var(--v3-blue);}
+.v3-obs-list{margin:0;padding-inline-start:30px;}
+.v3-obs-list li{padding:0 0 24px;margin:0 0 24px;border-bottom:1px solid var(--v3-hair);}
+.v3-obs-list li:last-child{padding-bottom:0;margin-bottom:0;border-bottom:0;}
+.v3-obs-list li::marker{color:var(--v3-gold);font-weight:700;}
 /* Figures always sit on ONE row, one equal column each, and each label on ONE line (labels are kept short in statements.ts). */
-.v3-obs-figs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0 24px;margin-top:10px;padding-top:9px;border-top:1px solid var(--v3-hair);}
+.v3-obs-figs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0 20px;margin-top:14px;padding:12px 16px;background:var(--v3-panel);}
+.v3-obs-card + .v3-legend{margin-top:18px;}
+/* Long hand-written observations: a smaller type scale so a full page of evidence fits the same frame. */
+.v3-obs-dense .v3-obs-text{font-size:22px;line-height:1.42;}
+.v3-obs-dense .v3-obs-title{font-size:34px;line-height:1.45;}
+.v3-obs-dense .v3-obs-body{padding:20px 22px;}
+.v3-obs-dense .v3-obs-list li{padding:0 0 12px;margin:0 0 12px;}
 .v3-fig{display:flex;flex-direction:column;gap:2px;min-width:0;}
 .v3-fig small{font-size:19px;line-height:1.3;color:var(--v3-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .v3-fig b{font-size:27px;font-weight:700;color:var(--v3-navy);line-height:1.1;}
 /* Population table: every header on ONE line (the narrow coverage column used to wrap to two). */
 .v3-pop-table .v3-table th{white-space:nowrap;}
+/* …except the coverage column, whose «نسبة التغطية من المستهدف» is wider than its cell: it wraps to two lines. */
+.v3-pop-table .v3-table th:last-child{white-space:normal;line-height:1.25;}
 /* Coverage progress: bar in the level colour, full = target reached, flag = finished. */
 .v3-cov{display:flex;align-items:center;gap:14px;}
 .v3-cov .v3-pop-bar{flex:1;position:relative;}

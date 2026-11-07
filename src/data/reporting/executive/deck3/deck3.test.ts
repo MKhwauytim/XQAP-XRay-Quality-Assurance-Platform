@@ -81,7 +81,10 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).toContain("نسبة تحديد موقع الاشتباه");
     expect(html).toContain("دقة السليمة");
     expect(html).toContain("دقة الاشتباه");
-    expect(html).toContain("الدقة العامة");
+    expect(html).toContain("معدل الاتفاق العام");
+    expect(html).toContain("التغطية الرقابية الإجمالية");
+    expect(html).not.toContain("التغطية الرقابية الكلية");
+    expect(html).not.toContain("نسبة التوائم");
   });
 
   it("wires real population counts, not the handoff's placeholder 148326/7563", async () => {
@@ -192,9 +195,9 @@ describe("buildExecutiveDeckV3", () => {
     expect(html).not.toContain("التوزيع على المنافذ البرية");
   });
 
-  it("defines the weights of the agreement formula and names the marking page's base", async () => {
+  it("states the agreement formula without the weights line and names the marking page's base", async () => {
     const html = await buildExecutiveDeckV3(input([popRow()]));
-    expect(html).toContain("وزن السليمة = إجابات السليمة ÷ إجمالي الإجابات");
+    expect(html).not.toContain("وزن السليمة = إجابات السليمة ÷ إجمالي الإجابات");
     expect(html).toContain("الأساس: صور الاشتباه المفحوصة");
   });
 });

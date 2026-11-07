@@ -46,6 +46,13 @@ export const HEADER_ALIASES: Record<string, string> = {
   "STAGE": "المستوى",
   "نتيجة المستوى الأول للأشعة": "نتيجة المستوى الأول",
   "نتيجة المستوى الثاني للأشعة": "نتيجة المستوى الثاني",
+  // From September 2026 (`Sep` / `SSep` sheets): the port column and the inline answer columns are named differently.
+  "المنفذ": "اسم المنفذ",
+  "نتيجة L1": "نتيجة المستوى الأول",
+  "نتيجة L2": "نتيجة المستوى الثاني",
+  "هل يوجد صورة": "هل يوجد صورة؟",
+  "هل يوجد تحديد": "هل يوجد تحديد؟",
+  "اسباب انخفاض جودة الصورة": "أسباب انخفاض الجودة",
 };
 export const canonicalHeader = (h: string): string => HEADER_ALIASES[h.trim()] ?? h;
 

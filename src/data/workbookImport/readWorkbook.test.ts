@@ -73,6 +73,29 @@ describe("readComprehensiveWorkbook", () => {
       expect(rows[2].row.levelTwoOther).toBe("0");
       expect(rows[2].row.levelOneOther).toBeUndefined();
     });
+    it("reads the September 2026 layout: mixed-case `SSep`/`Sep`, no «شهر الفحص», renamed columns, ISO expert date", async () => {
+      const HS = ["المستوى","معرف الأشعة","تاريخ دخول صورة الأشعة","نوع المنفذ","المنفذ","نتيجة المستوى الاول","نتيجة المستوى الثاني","تاريخ رصد الخبير","هل يوجد صورة","هل يوجد تحديد","مستوى جودة الصورة","اسباب انخفاض جودة الصورة","صحة النتيجة"];
+      const f = wbBlob({
+        SSep: [HS, ["FIRST_STAGE","S1","2026-08-01","منفذ بري","الحديثة","سليمة","اشتباه","2026-09-08T08:00:37.585Z","نعم","لا","متوسط","جودة التقاط الصورة منخفضة","اشتباه"]],
+        Sep: [["المستوى","معرف الأشعة","تاريخ الدخول","نوع المنفذ","المنفذ","نتيجة المستوى الأول","نتيجة المستوى الثاني"], ["THIRD_STAGE","P1","2026-08-02","منفذ بري","جديدة عرعر","سليمة","سليمة"]],
+      });
+      const { rows, populationSummary } = await readComprehensiveWorkbook(f);
+      expect(rows.map((r) => [r.row.xrayImageId, r.month, r.sheet])).toEqual([["S1", "9-september-2026", "SSep"]]);
+      expect(rows[0].row).toMatchObject({ portName: "الحديثة", imageAvailable: true, hasMarking: false, imageQuality: "متوسط", lowQualityReason: "جودة التقاط الصورة منخفضة", expertResult: "اشتباه" });
+      expect(populationSummary).not.toBeNull();
+    });
+    it("two sample workbooks: the first listed owns each month it has, the second only adds its extra months", async () => {
+      const older = wbBlob({ SJAN: [HA, ["FIRST_STAGE","OLD1","منفذ بحري","ميناء","سليمة","سليمة","46042","سليمة","1"]], JAN: [["معرف الأشعة"], ["p1"]] });
+      const newer = wbBlob({
+        SJAN: [HA, ["FIRST_STAGE","NEW1","منفذ بري","","سليمة","سليمة","46042","سليمة","1"]],
+        SFEB: [HA, ["FIRST_STAGE","NEW2","منفذ بري","الحديثة","سليمة","سليمة","46055","سليمة","2"]],
+        JAN: [["معرف الأشعة"], ["p1"], ["p2"]], FEB: [["معرف الأشعة"], ["p3"]],
+      });
+      const { rows, report, populationSummary } = await readComprehensiveWorkbooks([older, newer]);
+      expect(rows.map((r) => r.row.xrayImageId)).toEqual(["OLD1", "NEW2"]);
+      expect(report.sheetsRead.map((s) => s.name)).toEqual(["SJAN", "SFEB"]);
+      expect(populationSummary?.sheets.map((s) => [s.name, s.rows])).toEqual([["JAN", 1], ["FEB", 1]]);
+    });
     it("skips a row whose exam month has no derivable year", async () => {
       const f = wbBlob({ SJAN: [HA, ["FIRST_STAGE","X1","منفذ بحري","ميناء","اشتباه","سليمة","","سليمة","1"]] });
       const { rows, report } = await readComprehensiveWorkbook(f);
