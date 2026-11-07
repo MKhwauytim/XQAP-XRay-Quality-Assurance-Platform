@@ -14,7 +14,11 @@ export type MessageKey =
   | "picks.empty"
   | "picks.notNumber"
   | "picks.repeated"
-  | "picks.tooMany";
+  | "picks.tooMany"
+  | "bind.missingSlot"
+  | "bind.wrongKind"
+  | "bind.missingPick"
+  | "bind.titleNoFigure";
 
 export const MESSAGES_AR: Record<MessageKey, string> = {
   "schema.invalid": "بنية التقرير غير صالحة",
@@ -50,6 +54,10 @@ export const MESSAGES_AR: Record<MessageKey, string> = {
   "picks.notNumber": "القيمة المكتوبة ليست رقم تصميم",
   "picks.repeated": "رقم التصميم مكرر",
   "picks.tooMany": "عدد التصاميم المختارة يتجاوز الحد المسموح",
+  "bind.missingSlot": "خانة مطلوبة في التصميم لم تربط بحقل أو مقياس",
+  "bind.wrongKind": "نوع الربط لا يناسب الخانة",
+  "bind.missingPick": "لا يوجد ربط للتصميم المختار",
+  "bind.titleNoFigure": "عنوان الصفحة يجب أن يذكر رقما عبر مقياس",
 };
 
 export function formatIssue(

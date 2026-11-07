@@ -13,6 +13,8 @@ export const LONG_DASH = /[–—]/gu;
 export const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 /** `{{measure:id}}`; group 1 is the measure id. */
 export const MEASURE_PLACEHOLDER = /\{\{measure:([^}]+)\}\}/g;
+/** `{{slot:id}}` in a catalog design's text; group 1 is the slot id. Replaced at bind time. */
+export const SLOT_PLACEHOLDER = /\{\{slot:([^}]+)\}\}/g;
 /** `{{param:id}}`; group 1 is the param id. */
 export const PARAM_PLACEHOLDER = /\{\{param:([^}]+)\}\}/g;
 
