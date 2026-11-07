@@ -162,7 +162,8 @@ function levelFacts<T extends { stage: StageCountKey }>(items: T[], num: (x: T) 
 
 // ── Recommendations, by cause ───────────────────────────────────────────────────────────────────────────────────
 
-const REC = {
+/** The recommendation wording, shared with the port report's observations (portReport/portObservations.ts). */
+export const REC = {
   rootCause: (what: string) => `تحليل الأسباب الجذرية المؤدية ${what} من خلال تحديد عينة من الحالات على أساس كل مستوى من مستويات المخاطر لأغراض إعادة التحليل من الخبراء في مركزية الأشعة.`,
   staff: (what: string) => `رصد وتحليل أداء الموظفين العاملين على المنافذ التي شوهدت فيها مستويات مرتفعة من ${what} خلال فترة التقرير بشكل تراكمي، واتخاذ الإجراءات التصحيحية اللازمة.`,
   seizures: "تحليل الأسباب التي أدت إلى عدم رصد الحالات التي ارتبطت بضبطيات بالرغم من القدرة على اكتشاف الاشتباه بها من واقع الصور المعاد فحصها من ضمان الجودة.",

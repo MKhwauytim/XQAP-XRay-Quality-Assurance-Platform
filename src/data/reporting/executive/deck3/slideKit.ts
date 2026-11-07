@@ -283,17 +283,23 @@ export type ObservationCard = {
   recommendations: string[];
 };
 
+/** True when an observation's text is long enough for the dense type scale. */
+export function observationIsDense(o: ObservationCard): boolean {
+  const chars = o.title.length + o.evidence.reduce((n, e) => n + e.text.length, 0) + o.recommendations.reduce((n, r) => n + r.length, 0);
+  return chars > 450;
+}
+
 /** One observation per page: الملاحظة الرئيسية | الشواهد الجوهرية | التوصية. Every text is its own leaf so the viewer can edit each. */
-export function observationCard(o: ObservationCard): string {
+export function observationCard(o: ObservationCard, dense?: boolean): string {
   const figs = (f: ObservationFigure[]) =>
     f.length ? `<div class="v3-obs-figs">${f.map((x) => `<span class="v3-fig"><small>${esc(x.label)}</small><b>${esc(x.value)}</b></span>`).join("")}</div>` : "";
   const evidence = o.evidence.map((e) => `<li><span class="v3-obs-text">${esc(e.text)}</span>${figs(e.figures)}</li>`).join("");
   const recs = o.recommendations.map((r) => `<li><span class="v3-obs-text">${esc(r)}</span></li>`).join("");
   // Three fixed-width panels that fill the slide's free height: every observation page has the same frame, and only the
   // text inside grows or shrinks.
-  // Long text (the owner's hand-written observations) switches to the dense type scale.
-  const chars = o.title.length + o.evidence.reduce((n, e) => n + e.text.length, 0) + o.recommendations.reduce((n, r) => n + r.length, 0);
-  return `<div class="v3-obs-card${chars > 450 ? " v3-obs-dense" : ""}">
+  // Long text (the owner's hand-written observations) switches to the dense type scale. A caller that passes `dense`
+  // picks the scale for a whole set of pages, so every observation in it has the same type size.
+  return `<div class="v3-obs-card${(dense ?? observationIsDense(o)) ? " v3-obs-dense" : ""}">
   <section class="v3-obs-panel v3-obs-main ${o.tone}"><h3>الملاحظة الرئيسية</h3><div class="v3-obs-body"><span class="v3-obs-text v3-obs-title ${o.tone}">${esc(o.title)}</span></div></section>
   <section class="v3-obs-panel v3-obs-ev"><h3>الشواهد الجوهرية</h3><div class="v3-obs-body"><ul class="v3-obs-list">${evidence}</ul></div></section>
   <section class="v3-obs-panel v3-obs-rec"><h3>التوصية</h3><div class="v3-obs-body"><ol class="v3-obs-list">${recs}</ol></div></section>

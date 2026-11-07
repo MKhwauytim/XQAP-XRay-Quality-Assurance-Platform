@@ -15,6 +15,7 @@ import {
   dataTable,
   glossarySlide,
   legendRow,
+  observationCard,
   orgBlockHtml,
   sectionDivider,
   slideShell,
@@ -510,51 +511,34 @@ ${tintedPanel({
   return parts.join("\n");
 }
 
-/** Observations per page: each keeps its sentence, its figures row and its recommendation readable. */
-const OBSERVATIONS_PER_PAGE = 3;
 const OBS = "الملاحظات والتوصيات";
 
 /**
- * The observations as a grid of plain blocks in the look of deck3's v3-obs table (# | الملاحظة | التوصية).
- * Blocks rather than a table so every sentence, figure label and value keeps its own position and the
- * PowerPoint export places each as its own text box.
+ * «الملاحظات والتوصيات», one observation per page in the executive report's frame (deck3 observationCard):
+ * الملاحظة الرئيسية | الشواهد الجوهرية | التوصية. Each is built by rule from the figures (portObservations.ts).
  */
-function observationsBlock(rows: Array<{ number: string; tone: "red" | "gold"; observation: string; figures: Array<{ label: string; value: string }>; recommendation: string }>): string {
-  const body = rows
-    .map((r) => `<div class="pr-obs-row">
-  <div class="pr-obs-num v3-ink-${r.tone}">${esc(r.number)}</div>
-  <div class="pr-obs-main"><div class="pr-obs-text">${esc(r.observation)}</div><div class="pr-obs-figs">${r.figures.map((f) => `<div class="pr-obs-fig"><div class="pr-obs-fl">${esc(f.label)}</div><div class="pr-obs-fv">${esc(f.value)}</div></div>`).join("")}</div></div>
-  <div class="pr-obs-rec">${esc(r.recommendation)}</div>
-</div>`)
-    .join("");
-  return `<div class="pr-obs"><div class="pr-obs-row pr-obs-head"><div>#</div><div>الملاحظة</div><div>التوصية</div></div>${body}</div>`;
-}
-
-/** «الملاحظات والتوصيات»: one row per observation (built by rule from the figures, see portObservations.ts). */
 function observationSlides(m: PortReportModel, w: WorkloadSlideInput, meta: (key: string, label: string) => SlideMeta): string[] {
-  const obs = buildPortObservations(m, w);
-  if (!obs.length) return [];
-  const pages = Math.ceil(obs.length / OBSERVATIONS_PER_PAGE);
-  const out: string[] = [];
-  for (let p = 0; p < pages; p++) {
-    const rows = obs.slice(p * OBSERVATIONS_PER_PAGE, (p + 1) * OBSERVATIONS_PER_PAGE).map((o, i) => ({
-      number: String(p * OBSERVATIONS_PER_PAGE + i + 1),
+  const cards = buildPortObservations(m, w).map((o) => ({
+    topic: o.topic,
+    card: {
       tone: (o.priority === "عالية" ? "red" : "gold") as "red" | "gold",
-      observation: o.title,
-      figures: o.figures,
-      recommendation: o.recommendation,
-    }));
-    out.push(
-      slideShell(
-        meta("obs", OBS),
-        "",
-        `${contentHead({ eyebrow: OBS, title: OBS, note: pages > 1 ? `${p + 1} / ${pages}` : undefined })}
-${observationsBlock(rows)}
-<p class="v3-note" style="margin-top:10px;font-size:18px">كل ملاحظة مبنية على شرط في أرقام التقرير، ولا تظهر إلا إذا تحقق شرطها. المقارنة مع مستويات العبء الثلاثة دون ${esc(m.displayName)}. الأحمر أولوية عالية والذهبي أولوية متوسطة.</p>`,
-      ),
-    );
-  }
-  return out;
+      title: o.title,
+      evidence: o.evidence.map((text) => ({ text, figures: [] })),
+      recommendations: o.recommendations,
+    },
+  }));
+  // One type size on every observation page and in every panel (the owner saw the sizes jump between pages and
+  // between the main observation and its evidence): the dense scale is never switched on here, and the
+  // .pr-obs-even rule below sets one size for all three panels.
+  return cards.map(({ topic, card }, i) =>
+    slideShell(
+      meta("obs", OBS),
+      "",
+      `${contentHead({ eyebrow: OBS, title: `الملاحظة ${String(i + 1).padStart(2, "0")} - ${topic}` })}
+${observationCard(card, false).replace('class="v3-obs-card', 'class="v3-obs-card pr-obs-even')}
+${legendRow([{ swatch: "red", text: "أولوية عالية" }, { swatch: "gold", text: "أولوية متوسطة" }], "لون الملاحظة الرئيسية")}`,
+    ),
+  );
 }
 
 export { buildPortObservations };
@@ -708,17 +692,12 @@ export function buildPortReportHtml(m: PortReportModel, workload?: WorkloadSlide
   // Figures centred under their headers; the first (label) column stays right-aligned.
   const centre = ".slide.v3 .v3-table th:not(:first-child),.slide.v3 .v3-table td:not(:first-child){text-align:center;}.slide.v3 .v3-bar span{position:absolute;bottom:100%;margin-bottom:6px;color:var(--v3-navy);white-space:nowrap;z-index:2;}.slide.v3 .v3-bar{padding-top:0;}.slide.v3 .pr-pop td{padding-top:2px;padding-bottom:2px;font-size:22px;height:auto;}.slide.v3 .pr-dense td{font-size:17px;padding-top:0;padding-bottom:0;line-height:1.1;}.slide.v3 .pr-lv td{font-size:21px;white-space:nowrap;}.slide.v3 .pr-dense td:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.slide.v3 .pr-dense th{font-size:16px;}.slide.v3 .pr-dense td:first-child{font-size:16px;}.slide.v3 .pr-wrap td{white-space:normal;overflow:visible;line-height:1.05;}.slide.v3 .pr-tier td{font-size:18px;height:34px;}.slide.v3 .pr-tier td:first-child{font-size:16px;}.slide.v3 .v3-table th{white-space:normal;line-height:1.25;vertical-align:bottom;}" +
     ".slide.v3 .pr-yb .v3-bar span{font-size:17px;letter-spacing:0;}.slide.v3 .pr-yb1 .v3-bar span{font-size:15px;letter-spacing:-.3px;}" +
-    // No clipped text: the appendix rows grow with a wrapped port name, and figure labels in the observations wrap instead of an ellipsis.
+    // No clipped text: the appendix rows grow with a wrapped port name.
     ".slide.v3 .pr-apx td{height:auto;min-height:28px;overflow:visible;font-size:18px;}.slide.v3 .pr-apx td:first-child{font-size:17px;overflow:visible;}" +
-    ".slide.v3 .pr-obs{border-top:2px solid var(--v3-navy);border-bottom:2px solid var(--v3-navy);}" +
-    ".slide.v3 .pr-obs-row{display:grid;grid-template-columns:7% 55% 38%;border-bottom:1px solid var(--v3-hair);}.slide.v3 .pr-obs-row:last-child{border-bottom:0;}" +
-    ".slide.v3 .pr-obs-row>div{padding:12px 0 12px 18px;min-width:0;}.slide.v3 .pr-obs-row>div+div{border-inline-start:1px solid var(--v3-hair);padding-inline-start:20px;}" +
-    ".slide.v3 .pr-obs-head>div{font-size:24px;color:var(--v3-muted);padding-top:8px;padding-bottom:8px;}" +
-    ".slide.v3 .pr-obs-num{font-size:38px;font-weight:700;line-height:1.2;}.slide.v3 .pr-obs-text{font-size:24px;line-height:1.45;color:var(--v3-navy);}" +
-    ".slide.v3 .pr-obs-rec{font-size:24px;line-height:1.45;color:var(--v3-text);}" +
-    ".slide.v3 .pr-obs-figs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0 20px;margin-top:10px;padding-top:8px;border-top:1px solid var(--v3-hair);}" +
-    ".slide.v3 .pr-obs-fl{font-size:18px;line-height:1.3;color:var(--v3-muted);}.slide.v3 .pr-obs-fv{font-size:20px;font-weight:700;color:var(--v3-navy);white-space:nowrap;margin-top:2px;}" +
-    ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}";
+    ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}" +
+    // Observations: one size for the main observation, the evidence and the recommendations, on every page.
+    ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:26px;line-height:1.55;}" +
+    ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}";
   // Long dashes out, including the viewer script's escaped ones ("\u2014" in its page counter).
   return html.replace("</style>", `${centre}</style>`).replace(/[\u2013\u2014]/g, "-").replace(/\\u201[34]/g, "-");
 }
