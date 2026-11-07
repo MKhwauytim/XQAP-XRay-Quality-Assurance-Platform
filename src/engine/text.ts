@@ -13,6 +13,8 @@ export const LONG_DASH = /[–—]/gu;
 export const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 /** `{{measure:id}}`; group 1 is the measure id. */
 export const MEASURE_PLACEHOLDER = /\{\{measure:([^}]+)\}\}/g;
+/** `{{slot:id}}` in a catalog design's text; group 1 is the slot id. Replaced at bind time. */
+export const SLOT_PLACEHOLDER = /\{\{slot:([^}]+)\}\}/g;
 /** `{{param:id}}`; group 1 is the param id. */
 export const PARAM_PLACEHOLDER = /\{\{param:([^}]+)\}\}/g;
 
@@ -57,3 +59,9 @@ export function withoutTokens(s: string, remove: string[]): string {
     return " ";
   });
 }
+
+/** Common format and metric acronyms that R2 does not flag. */
+export const FORMAT_ACRONYMS: readonly string[] = ["HTML", "PPTX", "XLSX", "PDF", "CSV", "KPI"];
+
+/** Visual id of a slide title: its layout box and the resolution of any `{{measure:id}}` in a page title. */
+export const TITLE_VISUAL_ID = "title";
