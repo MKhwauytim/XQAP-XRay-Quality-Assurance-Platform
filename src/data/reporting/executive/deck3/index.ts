@@ -87,7 +87,11 @@ const DECK_V3_SCALE_SCRIPT = `(function(){
     var extra = Math.max(0, avail - 1920 * scale);
     var targetLeft = viewerLeft + padL + extra / 2;
     var curLeft = slide.getBoundingClientRect().left;
-    setTx(targetLeft - curLeft);
+    // curLeft already includes the shift applied by the previous fit(), so the correction is added to it.
+    // Replacing it instead left every resize after the first one off by the old shift (slides pushed off
+    // the left edge, a sideways scroll bar), until a fullscreen round trip happened to reset it to 0.
+    var prevTx = parseFloat(root.style.getPropertyValue('--v3-tx')) || 0;
+    setTx(prevTx + targetLeft - curLeft);
   }
   // On EXIT, fit()'s non-fullscreen branch measures .deck-viewer-v3's live
   // padding/clientWidth to compute the scale - but that measurement is only

@@ -48,7 +48,9 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
    --v3-bg here (this rule's original value) made the slide and the page
    around it the exact same color, indistinguishable except for a 1px hairline
    border - that's what made the report hard to read at a glance. */
-.deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-navy);}
+/* overflow-x:clip: the slide keeps its 1920px layout box and is scaled down visually, so without this the
+   unscaled box makes the whole page scroll sideways. clip (not hidden) creates no scroll container. */
+.deck-viewer-v3{display:block;min-height:100vh;padding:28px 16px 56px;background:var(--v3-navy);overflow-x:clip;}
 .slide.v3{
   /* Horizontal centering is a MEASURED pixel shift (--v3-tx, set by
      DECK_V3_SCALE_SCRIPT in index.ts), not a CSS margin/right trick. Two
@@ -61,7 +63,8 @@ body{background:var(--v3-navy);font-family:"Somar","IBM Plex Sans Arabic","Tahom
      JS measure the box's actual rendered position and correct it exactly is
      immune to that class of bug by construction. */
   width:1920px;height:1080px;margin:0;
-  margin-bottom:calc(-1080px * (1 - var(--v3-scale)) + 26px);
+  /* 48px between slides so each slide's start and end is clear. */
+  margin-bottom:calc(-1080px * (1 - var(--v3-scale)) + 48px);
   transform:translateX(var(--v3-tx,0px)) scale(var(--v3-scale));transform-origin:top left;
   position:relative;overflow:hidden;box-sizing:border-box;
   background:var(--v3-bg);color:var(--v3-text);
