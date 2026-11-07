@@ -108,7 +108,8 @@ function buildLevelRecord(
 ): DecisionRecord {
   const isLevelOne = level === "LEVEL_1";
   const inspectorId = isLevelOne ? row.levelOneEmployeeId : row.levelTwoEmployeeId;
-  const employeeDecision: ResultValue = isLevelOne ? row.levelOneResult : row.levelTwoResult;
+  // buildDecisionRecords never passes a row with a blank level.
+  const employeeDecision = (isLevelOne ? row.levelOneResult : row.levelTwoResult) as ResultValue;
   const studyReviewResult = row.expertResult;
   const reviewCompleted = isRowStudied(row);
 
@@ -162,6 +163,9 @@ export function buildDecisionRecords(
 ): DecisionRecord[] {
   const records: DecisionRecord[] = [];
   rows.forEach((row, index) => {
+    // A level whose result is not recorded yet ("", «نتائج أخرى») took no
+    // decision, so it has no record to score.
+    if (row.levelOneResult === "" || row.levelTwoResult === "") return;
     const sourceRowNumber = index + 1;
     const l1 = buildLevelRecord(row, periodId, "LEVEL_1");
     const l2 = buildLevelRecord(row, periodId, "LEVEL_2");
@@ -308,8 +312,8 @@ export function buildImageComparisons(rows: ExecutiveReportRow[]): ImageResultCo
   return rows.map((row): ImageResultComparison => {
     const review = row.expertResult;
     const results: Record<ResultSource, ResultValue | null> = {
-      levelOne: row.levelOneResult,
-      levelTwo: row.levelTwoResult,
+      levelOne: row.levelOneResult || null,
+      levelTwo: row.levelTwoResult || null,
       manual: row.otherResults.manual.result,
       opposite: row.otherResults.opposite.result,
       liveMeans: row.otherResults.liveMeans.result,

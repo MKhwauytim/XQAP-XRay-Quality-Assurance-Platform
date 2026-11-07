@@ -26,6 +26,22 @@ export function hasRecordedResults(
   return !isBlankResult(levelOneResult) && !isBlankResult(levelTwoResult);
 }
 
+/**
+ * The owner's third category (2026-11-07): a case whose L1/L2 results are
+ * not recorded yet stays in every report as «نتائج أخرى» (label
+ * `result_other`), never folded into «سليمة» or «اشتباه».
+ */
+export const OTHER_RESULT = "other" as const;
+export type ImageResultOrOther = ImageResult | typeof OTHER_RESULT;
+
+/** classifyImageResult, or «نتائج أخرى» for a case whose results are not recorded yet. */
+export function classifyImageResultOrOther(
+  levelOneResult: string | null | undefined,
+  levelTwoResult: string | null | undefined
+): ImageResultOrOther {
+  return hasRecordedResults(levelOneResult, levelTwoResult) ? classifyImageResult(levelOneResult, levelTwoResult) : OTHER_RESULT;
+}
+
 /** classifyImageResult, or null for a case whose results are not recorded yet. */
 export function classifyRecordedImageResult(
   levelOneResult: string | null | undefined,

@@ -40,9 +40,11 @@ export type ExecutiveReportRow = {
   stage: string | null;
   levelOneEmployeeId: string | null;
   levelTwoEmployeeId: string | null;
-  levelOneResult: "سليمة" | "اشتباه";
-  levelTwoResult: "سليمة" | "اشتباه";
-  imageResult: "سليمة" | "اشتباه";
+  /** "" = not recorded yet (v159.3); such a row's imageResult is "other". */
+  levelOneResult: "سليمة" | "اشتباه" | "";
+  levelTwoResult: "سليمة" | "اشتباه" | "";
+  /** "other" = «نتائج أخرى»: results not recorded, never counted as clean or suspicious. */
+  imageResult: "سليمة" | "اشتباه" | "other";
   selectedInSample: boolean;
   assignedTo: string | null;
   distributionStatus: string | null;
@@ -143,6 +145,8 @@ export type PortProfile = {
   population: number;
   clean: number;
   suspicious: number;
+  /** «نتائج أخرى»: population images whose L1/L2 results are not recorded yet. */
+  otherResults: number;
   suspicionRate: number;
   sampleSize: number;
   coverage: number;
@@ -202,6 +206,8 @@ export type ExecutiveKPIs = {
   completionRate: number;
   suspiciousCount: number;
   cleanCount: number;
+  /** «نتائج أخرى»: population images whose L1/L2 results are not recorded yet. */
+  otherResultCount: number;
   suspicionRate: number;
   overallAccuracy: number | null;
   /** IMAGE grain — see `PortProfile.suspiciousDetectionRateByImage`'s doc

@@ -6,6 +6,8 @@ import {
   groupEntriesByEmployeeStage,
   groupEntriesByEmployeePort,
   groupEntriesByEmployeeCertScan,
+  otherColumn,
+  otherSuffix,
 } from "./fold";
 import type { PreparedPopulationRow } from "../../population/populationTypes";
 import type { DistributionEntry } from "../../distribution/distributionTypes";
@@ -88,7 +90,7 @@ describe("groupRowsByStage", () => {
     const buckets = groupRowsByStage(rows);
     expect(buckets.map((b) => b.stageKey)).toEqual(["first", "second"]);
     const first = buckets.find((b) => b.stageKey === "first")!;
-    expect(first.counts).toEqual({ سليمة: 1, اشتباه: 1, total: 2 });
+    expect(first.counts).toEqual({ سليمة: 1, اشتباه: 1, other: 0, total: 2 });
   });
 
   it("returns an empty array for no rows", () => {
@@ -121,10 +123,10 @@ describe("groupRowsByPort", () => {
 describe("sumCounts", () => {
   it("sums سليمة/اشتباه/total across buckets", () => {
     const total = sumCounts([
-      { counts: { سليمة: 2, اشتباه: 1, total: 3 } },
-      { counts: { سليمة: 5, اشتباه: 0, total: 5 } },
+      { counts: { سليمة: 2, اشتباه: 1, other: 0, total: 3 } },
+      { counts: { سليمة: 5, اشتباه: 0, other: 2, total: 7 } },
     ]);
-    expect(total).toEqual({ سليمة: 7, اشتباه: 1, total: 8 });
+    expect(total).toEqual({ سليمة: 7, اشتباه: 1, other: 2, total: 10 });
   });
 });
 
@@ -139,8 +141,8 @@ describe("groupEntriesByEmployeeStage", () => {
     expect(stageKeysPresent).toEqual(["first", "second"]);
     const ahmed = rows.find((r) => r.username === "user1")!;
     expect(ahmed.displayName).toBe("أحمد");
-    expect(ahmed.stages.first).toEqual({ سليمة: 0, اشتباه: 1, total: 1 });
-    expect(ahmed.total).toEqual({ سليمة: 1, اشتباه: 1, total: 2 });
+    expect(ahmed.stages.first).toEqual({ سليمة: 0, اشتباه: 1, other: 0, total: 1 });
+    expect(ahmed.total).toEqual({ سليمة: 1, اشتباه: 1, other: 0, total: 2 });
     const other = rows.find((r) => r.username === "user2")!;
     expect(other.displayName).toBe("user2"); // falls back to username when no display name mapping
   });
@@ -173,14 +175,23 @@ describe("groupEntriesByEmployeeCertScan", () => {
   });
 });
 
-describe("blank-result cases are not counted as «سليمة»", () => {
-  it("leaves a case without recorded results out of the stage and port tallies", () => {
+describe("blank-result cases count as «نتائج أخرى», never «سليمة»", () => {
+  it("counts a case without recorded results as other in the stage and port tallies", () => {
     const rows = [
       row({ xrayImageId: "A", xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة" }),
       row({ xrayImageId: "B", xrayLevelOneResult: "", xrayLevelTwoResult: "" }),
     ];
-    expect(sumCounts(groupRowsByStage(rows))).toEqual({ سليمة: 1, اشتباه: 0, total: 1 });
+    expect(sumCounts(groupRowsByStage(rows))).toEqual({ سليمة: 1, اشتباه: 0, other: 1, total: 2 });
     const ports = groupRowsByPort(rows);
-    expect(sumCounts([...ports.land, ...ports.sea])).toEqual({ سليمة: 1, اشتباه: 0, total: 1 });
+    expect(sumCounts([...ports.land, ...ports.sea])).toEqual({ سليمة: 1, اشتباه: 0, other: 1, total: 2 });
+  });
+});
+
+describe("«نتائج أخرى» is shown only when present", () => {
+  it("adds a suffix and a column for a bucket with blank-result cases, nothing otherwise", () => {
+    expect(otherSuffix({ سليمة: 1, اشتباه: 0, other: 0, total: 1 })).toBe("");
+    expect(otherSuffix({ سليمة: 1, اشتباه: 0, other: 2, total: 3 })).toContain("نتائج أخرى 2");
+    expect(otherColumn("برية - ", { سليمة: 0, اشتباه: 0, other: 0, total: 0 })).toEqual({});
+    expect(otherColumn("برية - ", { سليمة: 0, اشتباه: 0, other: 3, total: 3 })).toEqual({ "برية - نتائج أخرى": 3 });
   });
 });

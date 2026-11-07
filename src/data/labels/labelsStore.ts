@@ -1760,6 +1760,7 @@ export const DEFAULT_LABELS = {
   excel_rows_incomplete_done:       "صُدّرت {n} حالة ناقصة من {target}. عبّئ الحقول الفارغة ثم ارفع الملف هنا للشهر نفسه.",
   excel_rows_report_col_field:      "الحقل",
   excel_rows_report_col_value:      "النتيجة",
+  result_other:                     "نتائج أخرى",
   result_not_recorded:              "غير محددة",
   excel_rows_failed:                "تعذّرت الإضافة: {error}",
   excel_rows_read_failed:           "تعذّرت قراءة الملف: {error}",

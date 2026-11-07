@@ -17,7 +17,7 @@ import { yieldToMain } from "../../storage/yieldToMain";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { computePopulationReportModel } from "./model";
 import type { PortBreakdown, ResultCounts, PopulationReportScope } from "./types";
-import { STAGE_LABELS } from "./fold";
+import { otherSuffix, STAGE_LABELS } from "./fold";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import { ZATCA_LOGO_URL } from "../../../branding/organization";
 
@@ -30,7 +30,7 @@ const ORG: OrgBlock = { logoUrl: ZATCA_LOGO_URL, orgName: "ضمان جودة ا�
 function resultRow(label: string, counts: ResultCounts): TableCell[] {
   return [
     { html: esc(label) },
-    { html: fmtNum(counts.total), cls: "v-navy" },
+    { html: fmtNum(counts.total) + esc(otherSuffix(counts)), cls: "v-navy" },
     { html: fmtNum(counts.سليمة), cls: "v-green" },
     { html: fmtNum(counts.اشتباه), cls: "v-red" },
   ];
@@ -55,9 +55,10 @@ function capWithRemainder<T extends { counts: ResultCounts }>(
     (acc, item) => ({
       سليمة: acc.سليمة + item.counts.سليمة,
       اشتباه: acc.اشتباه + item.counts.اشتباه,
+      other: acc.other + item.counts.other,
       total: acc.total + item.counts.total,
     }),
-    { سليمة: 0, اشتباه: 0, total: 0 }
+    { سليمة: 0, اشتباه: 0, other: 0, total: 0 }
   );
   return [
     ...top.map((item) => ({ label: labelOf(item), counts: item.counts })),
@@ -74,10 +75,11 @@ function portBreakdownTwoColumn(breakdown: PortBreakdown): string {
   const padTo = Math.max(landCapped.length, seaCapped.length);
   const rowsFor = (ports: Array<{ label: string; counts: ResultCounts }>) => ports.map((p) => resultRow(p.label, p.counts));
   const totalsFor = (ports: PortBreakdown["land"], label: string) => {
-    const total = { سليمة: 0, اشتباه: 0, total: 0 };
+    const total = { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
     for (const p of ports) {
       total.سليمة += p.counts.سليمة;
       total.اشتباه += p.counts.اشتباه;
+      total.other += p.counts.other;
       total.total += p.counts.total;
     }
     return resultRow(label, total);

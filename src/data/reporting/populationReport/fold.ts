@@ -3,7 +3,8 @@
 // المجتمع. Every grouping in this report uses the same سليمة/اشتباه/total
 // grain (spec §4.3) — one set of helpers, reused with different row sources,
 // rather than re-deriving the fold per section.
-import { classifyRecordedImageResult } from "../../population/imageResult";
+import { classifyImageResultOrOther, type ImageResultOrOther } from "../../population/imageResult";
+import { getLabels } from "../../labels/labelsStore";
 import {
   getStageKey,
   STAGE_COUNT_KEY_ORDER,
@@ -34,12 +35,11 @@ export const STAGE_LABELS: Readonly<Record<string, string>> = {
 const STAGE_ORDER: readonly string[] = STAGE_COUNT_KEY_ORDER;
 
 function emptyCounts(): ResultCounts {
-  return { سليمة: 0, اشتباه: 0, total: 0 };
+  return { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
 }
 
-/** A case without recorded results (null) has no verdict and is not counted. */
-function addResult(counts: ResultCounts, result: "سليمة" | "اشتباه" | null): void {
-  if (result === null) return;
+/** A case without recorded results counts as «نتائج أخرى», never as clean. */
+function addResult(counts: ResultCounts, result: ImageResultOrOther): void {
   counts[result] += 1;
   counts.total += 1;
 }
@@ -53,7 +53,7 @@ export function groupRowsByStage(rows: PreparedPopulationRow[]): StageBucket[] {
   for (const row of rows) {
     const key = getStageKey(row.stage);
     const counts = buckets.get(key) ?? emptyCounts();
-    addResult(counts, classifyRecordedImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
+    addResult(counts, classifyImageResultOrOther(row.xrayLevelOneResult, row.xrayLevelTwoResult));
     buckets.set(key, counts);
   }
   return STAGE_ORDER.filter((key) => buckets.has(key)).map((stageKey) => ({
@@ -72,7 +72,7 @@ export function groupRowsByPort(rows: PreparedPopulationRow[]): PortBreakdown {
       bucket = { sea: isSeaPort(row.portType), counts: emptyCounts() };
       map.set(name, bucket);
     }
-    addResult(bucket.counts, classifyRecordedImageResult(row.xrayLevelOneResult, row.xrayLevelTwoResult));
+    addResult(bucket.counts, classifyImageResultOrOther(row.xrayLevelOneResult, row.xrayLevelTwoResult));
   }
   const all: PortBucket[] = [...map.entries()].map(([portName, b]) => ({ portName, counts: b.counts }));
   const seaNames = new Set([...map.entries()].filter(([, b]) => b.sea).map(([name]) => name));
@@ -83,11 +83,22 @@ export function groupRowsByPort(rows: PreparedPopulationRow[]): PortBreakdown {
   };
 }
 
+/** " · نتائج أخرى n" after a figure, only when the bucket has any, so reports without blank results render unchanged. */
+export function otherSuffix(counts: ResultCounts): string {
+  return counts.other > 0 ? ` · ${getLabels().result_other} ${counts.other}` : "";
+}
+
+/** The «نتائج أخرى» XLSX column for a bucket, only when it has any. */
+export function otherColumn(prefix: string, counts: ResultCounts): Record<string, number> {
+  return counts.other > 0 ? { [`${prefix}${getLabels().result_other}`]: counts.other } : {};
+}
+
 export function sumCounts(buckets: Array<{ counts: ResultCounts }>): ResultCounts {
   const total = emptyCounts();
   for (const b of buckets) {
     total.سليمة += b.counts.سليمة;
     total.اشتباه += b.counts.اشتباه;
+    total.other += b.counts.other;
     total.total += b.counts.total;
   }
   return total;
@@ -112,7 +123,7 @@ export function groupEntriesByEmployeeStage(
       };
       byUser.set(entry.assignedTo, user);
     }
-    const result = classifyRecordedImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
+    const result = classifyImageResultOrOther(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
     const stageCounts = user.stages[stageKey] ?? emptyCounts();
     addResult(stageCounts, result);
     user.stages[stageKey] = stageCounts;
@@ -140,7 +151,7 @@ export function groupEntriesByEmployeePort(
       };
       byUser.set(entry.assignedTo, user);
     }
-    const result = classifyRecordedImageResult(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
+    const result = classifyImageResultOrOther(entry.row.xrayLevelOneResult, entry.row.xrayLevelTwoResult);
     addResult(user.ports[sea ? "sea" : "land"], result);
     addResult(user.total, result);
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyImageResult, classifyRecordedImageResult, hasRecordedResults, isBlankResult } from "./imageResult";
+import { classifyImageResult, classifyImageResultOrOther, classifyRecordedImageResult, hasRecordedResults, isBlankResult } from "./imageResult";
 
 describe("classifyImageResult", () => {
   it("returns اشتباه when either level is اشتباه", () => {
@@ -27,4 +27,10 @@ describe("blank results (v159.3 Excel cases)", () => {
     expect(hasRecordedResults("سليمة", "سليمة")).toBe(true);
     expect(isBlankResult("  ")).toBe(true);
   });
+});
+
+it("classifyImageResultOrOther gives a blank case its own «نتائج أخرى» category", () => {
+  expect(classifyImageResultOrOther("", "")).toBe("other");
+  expect(classifyImageResultOrOther("سليمة", "")).toBe("other");
+  expect(classifyImageResultOrOther("سليمة", "سليمة")).toBe("سليمة");
 });

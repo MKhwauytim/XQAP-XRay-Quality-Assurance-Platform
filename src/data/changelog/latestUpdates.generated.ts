@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.15",
+    "date": "2026-11-07",
+    "bucket": "enhancement",
+    "scope": "reporting",
+    "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
+  },
+  {
     "version": "v159.14",
     "date": "2026-11-07",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "months",
     "title": "restore split cases without a file; draw population-only cases into the sample; show original id for merged ad-hoc rows"
-  },
-  {
-    "version": "v159.6",
-    "date": "2026-11-01",
-    "bucket": "fix",
-    "scope": "months",
-    "title": "split cases keep their employee; repair earlier split; studied/unstudied queue filter"
   }
 ];
