@@ -6,11 +6,12 @@ import { canonicalHeader, mapSampleRow, newMappingReport, type MappedWorkbookRow
 
 const REQUIRED = ["معرف الأشعة", "الشهر", "نتيجة المستوى الأول", "نتيجة المستوى الثاني", "الاكتمال"];
 /** `Q1_Sample` (merged layout) or `SJAN`…`SDEC` (examined-sample layout). */
-const SAMPLE_SHEET = /^(?:Q\d_Sample|S(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))$/;
+// Case-insensitive: from September 2026 the sheets are named `SSep` / `Sep`, not `SSEP` / `SEP`.
+const SAMPLE_SHEET = /^(?:Q\d_Sample|S(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))$/i;
 /** The follow-up workbook («متابعة أعمال الفحص»): one answered sheet per month, `1-Jan`…`12-Dec`. */
 const FOLLOW_UP_SHEET = /^\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/;
 /** The monthly population sheets of the examined-sample workbook: `JAN`…`DEC`. */
-const POPULATION_SHEET = /^(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$/;
+const POPULATION_SHEET = /^(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$/i;
 const IMAGE_STATUSES = new Set(["نعم", "لا", "معرف غير صحيح", "لا يوجد صورة", "سرت سكان"]);
 /** Key under which the follow-up sheet's own expert verdict is carried (never overrides the sample workbook's). */
 const FOLLOW_UP_VERDICT = "نتيجة صحة المتابعة";
@@ -130,15 +131,15 @@ function withFollowUp(cells: Record<string, string>, index: FollowUpIndex | null
 
 /** Folds every population sheet into totals (rows are never retained). January's results are numeric codes. */
 async function readPopulation(
-  wb: OpenWorkbook,
-  shared: string[],
+  parts: Array<{ wb: OpenWorkbook; shared: string[]; sheets: SheetRef[] }>,
   onProgress?: (p: { sheet: string; done: number; total: number }) => void,
 ): Promise<PopulationSummary> {
   const fold = createPopulationFold();
   const sheets: Array<{ name: string; rows: number }> = [];
-  for (let i = 0; i < wb.sheets.length; i++) {
-    const { name, path } = wb.sheets[i];
-    onProgress?.({ sheet: name, done: i, total: wb.sheets.length });
+  const all = parts.flatMap((p) => p.sheets.map((s) => ({ ...p, sheet: s })));
+  for (let i = 0; i < all.length; i++) {
+    const { wb, shared, sheet: { name, path } } = all[i];
+    onProgress?.({ sheet: name, done: i, total: all.length });
     const xml = await readZipEntryText(wb.file, wb.need(path));
     let header: Record<string, string> = {};
     let rows = 0;
@@ -150,7 +151,7 @@ async function readPopulation(
       const cells: Record<string, string> = {};
       for (const [col, h] of Object.entries(header)) if (rec[col] !== undefined && h !== "__proto__") cells[h] = rec[col];
       rows++;
-      fold.add(cells, name === "JAN");
+      fold.add(cells, name.toUpperCase() === "JAN");
     });
     sheets.push({ name, rows });
   }
@@ -192,30 +193,53 @@ export async function readComprehensiveWorkbooks(
   }
   const primary = examinedWbs[0] ?? merged[0] ?? null;
   if (!primary) throw new Error("XQ-WB-NOSAMPLE: no sample sheet found (Q*_Sample or S<MON>)");
-  enrichment.push(...examinedWbs.slice(1), ...merged.filter((wb) => wb !== primary));
+  // Several examined-sample workbooks (an older, cleaner one and a newer one with more months): each month is read
+  // from the FIRST workbook that has it, later ones only add the months it lacks. They never enrich earlier months.
+  const sources = examinedWbs.length > 0 ? examinedWbs : [primary];
+  enrichment.push(...merged.filter((wb) => wb !== primary));
   if (opts.requireFollowUp && enrichment.length === 0) throw new Error("XQ-WB-NOFOLLOWUP: the follow-up workbook (1-Jan…12-Dec sheets) was not provided");
   let followUp: FollowUpIndex | null = null;
   if (enrichment.length > 0) {
     followUp = new Map();
     for (const wb of enrichment) await readFollowUp(wb, report, followUp);
   }
-  const sheets = primary.sheets;
-  const shared = await sharedStringsOf(primary);
+  const firstOwner = <T extends { name: string }>(lists: T[][]): T[][] => {
+    const seen = new Set<string>();
+    return lists.map((list) => list.filter((s) => {
+      const m = examMonthOfSheet(s.name);
+      if (m === null) return true;
+      if (seen.has(String(m))) return false;
+      seen.add(String(m));
+      return true;
+    }));
+  };
+  const sampleSheets = firstOwner(sources.map((wb) => wb.sheets));
+  const work: Array<{ wb: OpenWorkbook; shared: string[]; sheet: SheetRef }> = [];
+  const sharedOf = new Map<OpenWorkbook, string[]>();
+  for (let w = 0; w < sources.length; w++) {
+    const shared = await sharedStringsOf(sources[w]);
+    sharedOf.set(sources[w], shared);
+    for (const sheet of sampleSheets[w]) work.push({ wb: sources[w], shared, sheet });
+  }
+  const sheets = work.map((x) => x.sheet);
   const rows: MappedWorkbookRow[] = [];
-  for (let i = 0; i < sheets.length; i++) {
-    const { name, path } = sheets[i];
+  for (let i = 0; i < work.length; i++) {
+    const { wb, shared, sheet: { name, path } } = work[i];
     onProgress?.({ sheet: name, done: i, total: sheets.length });
-    const raw = parseSheetRows(await readZipEntryText(primary.file, primary.need(path)), shared);
+    const raw = parseSheetRows(await readZipEntryText(wb.file, wb.need(path)), shared);
     const hdr = Object.fromEntries(Object.entries(raw[0] ?? {}).map(([col, h]) => [col, canonicalHeader(h)]));
     const headers = new Set(Object.values(hdr));
-    // No «الاكتمال» column: the sheet lists examined samples only, so each row is a completed sample.
-    const examined = !headers.has("الاكتمال") && Object.values(raw[0] ?? {}).includes("شهر الفحص");
-    const missing = REQUIRED.filter((h) => !headers.has(h) && !(examined && h === "الاكتمال"));
+    const sheetMonth = examMonthOfSheet(name);
+    // No «الاكتمال» column: the sheet lists examined samples only, so each row is a completed sample. An S<MON>
+    // sheet without «شهر الفحص» (`SSep` onwards) is examined too: its exam month is the sheet's own.
+    const monthFromSheet = !headers.has("الشهر") && sheetMonth !== null;
+    const examined = !headers.has("الاكتمال") && (Object.values(raw[0] ?? {}).includes("شهر الفحص") || monthFromSheet);
+    const missing = REQUIRED.filter((h) => !headers.has(h) && !(examined && h === "الاكتمال") && !(monthFromSheet && h === "الشهر"));
     if (missing.length) throw new Error(`XQ-WB-COLUMNS: ${name} missing ${missing.join("، ")}`);
     const data = rowsByHeader([hdr, ...raw.slice(1)]);
     report.sheetsRead.push({ name, rows: data.length });
-    const sheetMonth = examMonthOfSheet(name);
-    for (const cells of data) {
+    for (const sheetCells of data) {
+      const cells = monthFromSheet ? { ...sheetCells, "الشهر": String(sheetMonth) } : sheetCells;
       // Exam month: the S<MON> sheet, else the row's bare month number («شهر الفحص»).
       const raw = (cells["الشهر"] ?? "").trim();
       const month = sheetMonth ?? (/^(?:[1-9]|1[0-2])$/.test(raw) ? Number(raw) : null);
@@ -224,8 +248,10 @@ export async function readComprehensiveWorkbooks(
     }
   }
   // The same workbook also carries the risk population (JAN…DEC) the samples were drawn from.
-  const popWb = await openWorkbook(primary.file, POPULATION_SHEET);
-  const populationSummary = popWb.sheets.length > 0 ? await readPopulation(popWb, shared, onProgress) : null;
+  const popWbs = await Promise.all(sources.map((wb) => openWorkbook(wb.file, POPULATION_SHEET)));
+  const popSheets = firstOwner(popWbs.map((wb) => wb.sheets));
+  const popParts = popWbs.map((wb, i) => ({ wb, shared: sharedOf.get(sources[i]) ?? [], sheets: popSheets[i] })).filter((p) => p.sheets.length > 0);
+  const populationSummary = popParts.length > 0 ? await readPopulation(popParts, onProgress) : null;
   onProgress?.({ sheet: "", done: sheets.length, total: sheets.length });
   return { rows, report, populationSummary };
 }

@@ -888,10 +888,55 @@ export async function buildExecutiveWorkbookObject(
   return wb;
 }
 
+/** «تصنيف التحقق» in Arabic: the image's combined L1/L2 result against the specialist's verdict. */
+const VERIFICATION_AR: Record<string, string> = {
+  "correct-clean": "سليمة صحيحة",
+  "correct-suspicious": "اشتباه صحيح",
+  "missed-suspicious": "اشتباه فائت",
+  "excess-suspicious": "اشتباه خاطئ",
+};
+
 /**
- * The comprehensive report's workbook: the page-level supporting sheets first (an index plus one sheet per report page,
- * built from the same helpers the slides use), then the raw data they are computed from — one row per studied image with
- * every field the report was generated from. Used by the comprehensive-report page.
+ * The comprehensive report's raw-data sheet, one row per studied image. The columns the source workbooks carry come
+ * first, under the workbook's own names; the columns the app computes from them follow ON THE RIGHT, in Arabic
+ * (owner, 2026-10-14), so a reader can tell the source data from what was derived.
+ */
+async function comprehensiveRowSheet(model: ReportModel): Promise<Cell[][]> {
+  const header: Cell[] = [
+    // From the source workbooks.
+    "معرف الأشعة", "المستوى", "نوع المنفذ", "اسم المنفذ", "نتيجة المستوى الأول", "نتيجة المستوى الثاني", "صحة النتيجة",
+    "هل يوجد صورة؟", "هل يوجد تحديد؟", "مستوى جودة الصورة", "أسباب انخفاض الجودة", "تقييم الاشتباه",
+    "الاصناف المشبوهة", "الية التهريب المحتملة", "نتيجة المعاين", "نتيجة المفتش المعاكس", "نتيجة الوسائل الحية", "الملاحظات العامة",
+    // Computed by the app.
+    "محسوب: النتيجة المجمّعة للصورة", "محسوب: سبب عدم وجود الصورة", "محسوب: اتفاق نتيجة الصورة",
+    "محسوب: اتفاق المستوى الأول", "محسوب: اتفاق المستوى الثاني", "محسوب: تصنيف التحقق",
+    "محسوب: نتيجة أخرى للمستوى الأول", "محسوب: نتيجة أخرى للمستوى الثاني",
+  ];
+  const body: Cell[][] = [];
+  for (let i = 0; i < model.rows.length; i += EXPORT_CHUNK_SIZE) {
+    for (const r of model.rows.slice(i, i + EXPORT_CHUNK_SIZE)) {
+      body.push([
+        r.xrayImageId, text(r.stage), text(r.portType), text(r.portName),
+        // An «other» level result is shown as the workbook had it, never as the سليمة placeholder the fold uses.
+        r.levelOneOther ?? result(r.levelOneResult), r.levelTwoOther ?? result(r.levelTwoResult), result(r.expertResult),
+        yesNo(r.imageAvailable), yesNo(r.hasMarking), text(r.imageQuality), text(r.lowQualityReason), text(r.suspicionLevel),
+        text(r.suspectedTypes), text(r.smuggleMethod),
+        result(r.otherResults.manual.result), result(r.otherResults.opposite.result), result(r.otherResults.liveMeans.result),
+        text(r.notes),
+        result(r.imageResult), text(r.noImageReason), yesNo(r.imageResultAccurate),
+        yesNo(r.levelOneAccurate), yesNo(r.levelTwoAccurate),
+        r.verificationCategory ? (VERIFICATION_AR[r.verificationCategory] ?? r.verificationCategory) : DASH,
+        r.levelOneOther ?? DASH, r.levelTwoOther ?? DASH,
+      ]);
+    }
+    if (model.rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
+  return [header, ...body];
+}
+
+/**
+ * The comprehensive report's data workbook: ONLY the raw data the report is computed from, one row per studied image
+ * (the page-level tables are in the report and its separate support workbook). Used by the comprehensive-report page.
  */
 export async function buildExecutiveRawWorkbookObject(
   input: ExecutiveReportInput,
@@ -899,8 +944,9 @@ export async function buildExecutiveRawWorkbookObject(
 ): Promise<XLSX.WorkBook> {
   const model = buildReportModel(input, employeeDisplayNames);
   const wb = XLSX.utils.book_new();
-  for (const sheet of buildDeckSupportSheets(model, { hasDecisionTable: false })) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet.aoa), sheet.name);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(await rowSheet(model)), SHEET_NAMES.rows);
+  const ws = XLSX.utils.aoa_to_sheet(await comprehensiveRowSheet(model));
+  ws["!views"] = [{ RTL: true }];
+  XLSX.utils.book_append_sheet(wb, ws, SHEET_NAMES.rows);
   return wb;
 }
 

@@ -7,8 +7,8 @@
 // deck2/index.ts and the markup mirrors buildDeckV2Html's, so the two decks
 // review identically — only the slide design differs (theme.ts).
 import { buildReportModel } from "../model/reportModel";
-import { buildDeck3Slides } from "./slides";
-import { buildStatements } from "./statements";
+import { buildDeck3Slides, type Observation } from "./slides";
+import { buildObservations } from "./statements";
 import { DECK_V3_CSS } from "./theme";
 import { icon } from "../ui/icons";
 import { DECK_NAV_SCRIPT, DECK_FULLSCREEN_SCRIPT } from "../deck2";
@@ -205,11 +205,11 @@ export type DeckV3Options = {
 export async function buildExecutiveDeckV3(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-  options: Pick<DeckV3Options, "textTemplate"> = {},
+  options: Pick<DeckV3Options, "textTemplate"> & { observations?: Observation[] } = {},
 ): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
   const monthLabel = input.periodLabel ?? formatMonthFolderShortLabel(input.monthFolderName);
-  const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget, new Date(), buildStatements(model));
+  const slides = await buildDeck3Slides(model, monthLabel, input.config.monthlyTarget, new Date(), options.observations ?? buildObservations(model));
   return buildDeckV3Html(slides, monthLabel, {}, "", options.textTemplate ?? null);
 }
 

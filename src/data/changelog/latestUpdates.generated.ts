@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.19",
+    "date": "2026-11-07",
+    "bucket": "feature",
+    "scope": "deck3",
+    "title": "automated الملاحظات والتوصيات from data-triggered observation types"
+  },
+  {
     "version": "v159.18",
     "date": "2026-11-07",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "referrals",
     "title": "admin queue lists undistributed sample cases as «غير موزعة»"
-  },
-  {
-    "version": "v159.10",
-    "date": "2026-11-01",
-    "bucket": "fix",
-    "scope": "months",
-    "title": "Excel report says whether an existing case is distributed"
   }
 ];
