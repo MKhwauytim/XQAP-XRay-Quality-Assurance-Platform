@@ -69,7 +69,7 @@ const MEASURES: MeasureSpec[] = [
 ];
 
 /** Per design: the pick title and slot bindings. The note slot is added for every design. */
-const PICKS: Record<number, { title: string; slots: Record<string, SlotBinding> }> = {
+const PICKS: Record<number, { title: string; slots: Record<string, SlotBinding>; repeat?: number }> = {
   1: {
     title: "قراءة نتائج المطابقة",
     slots: { heading: { text: "نتائج المطابقة في المنافذ" }, description: { text: "قراءة لنسب المطابقة حسب المنفذ والشهر" } },
@@ -90,6 +90,34 @@ const PICKS: Record<number, { title: string; slots: Record<string, SlotBinding> 
     title: "نسبة المطابقة {{measure:matchRate}} في المنافذ الأربعة",
     slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "ports" }, category: { field: "port" }, value: { measure: "studied" } },
   },
+  6: {
+    title: "نسبة المطابقة {{measure:matchRate}} مع قراءة للمنافذ",
+    slots: {
+      category: { field: "port" }, value: { measure: "studied" },
+      panelTitle: { text: "قراءة المخطط" },
+      panelText: { text: "طابقت {{measure:matched}} حاوية، وتتصدر المخطط المنافذ الأكثر حاويات." },
+    },
+  },
+  7: {
+    title: "أعلى خمسة منافذ من {{measure:ports}} منافذ حسب الحاويات المدروسة",
+    slots: { category: { field: "port" }, value: { measure: "studied" } },
+    repeat: 2,
+  },
+  8: {
+    title: "نسبة المطابقة {{measure:matchRate}} خلال الأشهر الثلاثة",
+    slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "ports" }, row1: { field: "month" }, rowOrder: { measure: "monthOrder" }, value1: { measure: "studied" }, value2: { measure: "matched" } },
+  },
+  9: {
+    title: "تعريفات المصطلحات المستخدمة في التقرير",
+    slots: {
+      term1: { text: "العينة" }, definition1: { text: "الحاويات المختارة عشوائيًا من مجتمع الشهر لمراجعتها." },
+      term2: { text: "المطابقة" }, definition2: { text: "اتفاق نتيجة المراجعة مع نتيجة الفحص الأصلية." },
+      term3: { text: "المنفذ" }, definition3: { text: "المنفذ الجمركي الذي فحصت فيه الحاوية." },
+      term4: { text: "نسبة المطابقة" }, definition4: { text: "الحاويات المطابقة مقسومة على الحاويات المدروسة." },
+      term5: { text: "الحاويات المدروسة" }, definition5: { text: "كل حاوية في العينة اكتملت مراجعتها." },
+      term6: { text: "أخرى" }, definition6: { text: "الفئات التي تجمع في عمود واحد خارج الأعلى ترتيبًا." },
+    },
+  },
 };
 
 export function demoInputs(design: CatalogDesign, opts: { repeat?: number } = {}): { base: PicksBase; binding: PickBinding; files: RawFile[] } {
@@ -103,7 +131,7 @@ export function demoInputs(design: CatalogDesign, opts: { repeat?: number } = {}
     params: [],
   };
   const binding: PickBinding = { number: design.number, title: pick.title, slots: { ...pick.slots, [NOTE_SLOT.id]: { text: DEMO_NOTE } } };
-  return { base, binding, files: demoFiles(Math.min(3, Math.max(1, opts.repeat ?? 1))) };
+  return { base, binding, files: demoFiles(Math.min(3, Math.max(1, opts.repeat ?? pick.repeat ?? 1))) };
 }
 
 /** The design's demo layout, as the gate test and the lookbook see it. Throws with the Arabic message on refusal. */

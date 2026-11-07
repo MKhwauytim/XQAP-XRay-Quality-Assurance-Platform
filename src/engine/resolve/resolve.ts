@@ -226,7 +226,14 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
   const valueOf = (g: Group, id: string) => quick(g.rows, id);
   let groups = sortGroups(ctx, v, [...byId.values()], valueOf);
 
-  if (v.type === "barChart" && groups.length > LIMITS.maxChartCategories) {
+  // A chart keeps its top `limit.topN` categories by the lead measure (the rest fold into «أخرى» when
+  // `others`, else are dropped); with no limit, only the chart category cap folds.
+  const cap = LIMITS.maxChartCategories - 1;
+  const keepN = v.type !== "barChart" ? undefined
+    : v.limit !== undefined ? Math.min(v.limit.topN, cap)
+    : groups.length > LIMITS.maxChartCategories ? cap : undefined;
+  if (keepN !== undefined && groups.length > keepN) {
+    const fold = v.limit === undefined || v.limit.others;
     const lead = measures[0]?.id;
     const ranked = [...groups].sort((a, b) => {
       const x = lead === undefined ? null : valueOf(a, lead), y = lead === undefined ? null : valueOf(b, lead);
@@ -235,12 +242,12 @@ function resolveVisual(ctx: Ctx, pageIndex: number, pageFilters: FilterSpec[], v
       if (y === null) return -1;
       return y - x;
     });
-    const keep = new Set(ranked.slice(0, LIMITS.maxChartCategories - 1));
+    const keep = new Set(ranked.slice(0, keepN));
     const rest = groups.filter((g) => !keep.has(g)).flatMap((g) => g.rows);
     // The bucket lives outside the identity keyspace: no real category can collide with it.
     const bucket: Group = { id: "", label: OTHERS_LABEL, display: {}, typed: {}, rows: rest, others: true };
     for (const f of fields) { bucket.display[f] = OTHERS_LABEL; bucket.typed[f] = OTHERS_LABEL; }
-    groups = [...groups.filter((g) => keep.has(g)), bucket];
+    groups = [...groups.filter((g) => keep.has(g)), ...(fold ? [bucket] : [])];
   }
 
   base.categories = groups.map((g) => g.label);

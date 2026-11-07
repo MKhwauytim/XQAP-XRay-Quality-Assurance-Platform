@@ -4,6 +4,11 @@ import { d02Kpi } from "./designs/d02-kpi";
 import { d03Bars } from "./designs/d03-bars";
 import { d04Table } from "./designs/d04-table";
 import { d05KpiBars } from "./designs/d05-kpi-bars";
+import { d06BarsNote } from "./designs/d06-bars-note";
+import { d07TopRanked } from "./designs/d07-top-ranked";
+import { d08KpiTable } from "./designs/d08-kpi-table";
+import { d09Glossary } from "./designs/d09-glossary";
+import { PLANNED } from "./designs/planned";
 import type { CatalogDesign } from "./types";
 
 /**
@@ -11,7 +16,9 @@ import type { CatalogDesign } from "./types";
  * number means retiring that number and adding a new one. Every design in CATALOG must have a lock entry
  * with the same nameAr and the same slot ids.
  */
-export const CATALOG: readonly CatalogDesign[] = [d01Section, d02Kpi, d03Bars, d04Table, d05KpiBars];
+export const CATALOG: readonly CatalogDesign[] = [
+  d01Section, d02Kpi, d03Bars, d04Table, d05KpiBars, d06BarsNote, d07TopRanked, d08KpiTable, d09Glossary, ...PLANNED,
+];
 
 export type GetDesignResult = { ok: true; design: CatalogDesign } | { ok: false; issue: EngineIssue };
 

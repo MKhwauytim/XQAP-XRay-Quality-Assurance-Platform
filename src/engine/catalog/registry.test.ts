@@ -37,6 +37,19 @@ describe("catalog registry", () => {
     for (const d of CATALOG) expect(NUMBERS_LOCK[d.number], `lock for ${d.number}`).toBeDefined();
   });
 
+  it("numbers 10 to 17 are reserved as planned, slots frozen in the lock", () => {
+    for (let n = 10; n <= 17; n++) {
+      const d = CATALOG.find((x) => x.number === n);
+      expect(d?.status, `design ${n}`).toBe("planned");
+      expect(d?.page.visuals).toEqual([]);
+      expect(d?.deck3Source).not.toBe("");
+      expect(NUMBERS_LOCK[n]?.slotIds.length, `lock for ${n}`).toBeGreaterThan(0);
+      for (const s of d?.slots ?? []) expect(NUMBERS_LOCK[n].slotIds).toContain(s.id);
+      const g = getDesign(n);
+      expect(!g.ok && g.issue.rule).toBe("catalog.planned");
+    }
+  });
+
   it("unknown number refused", () => {
     const r = getDesign(999);
     expect(r.ok).toBe(false);

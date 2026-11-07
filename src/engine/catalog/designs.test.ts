@@ -22,8 +22,8 @@ const byNumber = (n: number) => {
 };
 
 describe("catalog designs", () => {
-  it("has designs 1 to 5 active", () => {
-    expect(activeDesigns().map((d) => d.number)).toEqual([1, 2, 3, 4, 5]);
+  it("has designs 1 to 9 active", () => {
+    expect(activeDesigns().map((d) => d.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("every active design passes the catalog entry gate", () => {
@@ -72,7 +72,7 @@ describe("catalog designs", () => {
   });
 
   it("bars in designs 3 and 5 rank by value, highest first", () => {
-    for (const n of [3, 5]) {
+    for (const n of [3, 5, 6]) {
       const bar = renderDesignDemo(byNumber(n), env()).slides[0].boxes.find((b) => b.kind === "bar");
       if (bar?.kind !== "bar") throw new Error(`design ${n} has no bar`);
       const vals = bar.values.map((v) => v ?? 0);
@@ -80,11 +80,35 @@ describe("catalog designs", () => {
     }
   });
 
-  it("design 4 rows run in calendar month order", () => {
-    const table = renderDesignDemo(byNumber(4), env()).slides[0].boxes.find((b) => b.kind === "table");
+  it("designs 4 and 8 rows run in calendar month order", () => {
+    for (const n of [4, 8]) {
+    const table = renderDesignDemo(byNumber(n), env()).slides[0].boxes.find((b) => b.kind === "table");
     if (table?.kind !== "table") throw new Error("no table");
     const months = table.rows.map((r) => r[0].lines.map((l) => l.map((x) => x.text).join("")).join("")).filter((t) => t !== "الإجمالي");
-    expect([...new Set(months)]).toEqual(["يناير", "فبراير", "مارس"]);
+    expect([...new Set(months)], `design ${n}`).toEqual(["يناير", "فبراير", "مارس"]);
+    }
+  });
+
+  it("design 7 keeps the top five, highest first, and folds the rest into «أخرى»", () => {
+    const bar = renderDesignDemo(byNumber(7), env()).slides[0].boxes.find((b) => b.kind === "bar");
+    if (bar?.kind !== "bar") throw new Error("design 7 has no bar");
+    expect(bar.categories).toHaveLength(6);
+    expect(bar.categories[5]).toBe("أخرى");
+    const top = bar.values.slice(0, 5).map((v) => v ?? 0);
+    expect(top).toEqual([...top].sort((a, b) => b - a));
+  });
+
+  it("design 6 shows the panel heading and its figure beside the chart", () => {
+    const doc = renderDesignDemo(byNumber(6), env());
+    expect(shownText(doc).join(" ")).toContain("قراءة المخطط");
+    expect(doc.figures.some((f) => f.boxId.includes("panelText"))).toBe(true);
+  });
+
+  it("design 9 shows every bound term and definition and overrules R8 with its reason", () => {
+    const d = byNumber(9);
+    expect(d.overrules).toEqual([{ rule: "R8", reasonAr: "شريحة تعريفات لا تحمل أرقامًا" }]);
+    const text = shownText(renderDesignDemo(d, env())).join(" ");
+    for (const w of ["العينة", "المطابقة", "المنفذ"]) expect(text).toContain(w);
   });
 
   it("design 1 has a single title text, its heading", () => {
@@ -94,8 +118,8 @@ describe("catalog designs", () => {
     expect(shownText(doc).filter((t) => t.includes("نتائج المطابقة في المنافذ"))).toHaveLength(1);
   });
 
-  it("titles of designs 2 and 5 state a figure the band does not show", () => {
-    for (const n of [2, 5]) {
+  it("titles of designs 2, 5, 6, 7 and 8 state a figure the band does not show", () => {
+    for (const n of [2, 5, 6, 7, 8]) {
       const doc = renderDesignDemo(byNumber(n), env());
       const titleKeys = doc.figures.filter((f) => f.boxId === "s1-title").map((f) => f.valueKey);
       const bandKeys = doc.figures.filter((f) => f.boxId !== "s1-title").map((f) => f.valueKey);
