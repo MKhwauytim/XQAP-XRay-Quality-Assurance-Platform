@@ -67,4 +67,24 @@ describe("issueReport: all or nothing", () => {
     expect(a.parityReport.passed).toBe(true);
     expect(a.parityReport.counts.slides).toBe(2);
   });
+
+  describe("F5 is Floor and blocks issue", () => {
+    const toneKpi = (f: Fixture, statusWord: boolean): void => {
+      const [text, kpi] = f.spec.pages[0]!.visuals;
+      kpi!.format = { tone: "bad" };
+      text!.text = statusWord ? "متأخر" : "";
+      if (!statusWord) f.spec.pages[0]!.visuals = [kpi!];
+    };
+    it("a bad-toned KPI with no status word returns ok:false naming F5", async () => {
+      const f = twoSlideFixture(); toneKpi(f, false);
+      const r = await issueReport(f.spec, FIXTURE_FILES, f.params, baseEnv(f));
+      expect(r.ok).toBe(false); if (r.ok) return;
+      expect(r.issues.some((i) => i.rule === "gate.lint" && (i.detail ?? "").startsWith("F5"))).toBe(true);
+    });
+    it("the same KPI with a status word beside it issues ok:true", async () => {
+      const f = twoSlideFixture(); toneKpi(f, true);
+      const r = await issueReport(f.spec, FIXTURE_FILES, f.params, baseEnv(f));
+      expect(r.ok).toBe(true);
+    });
+  });
 });

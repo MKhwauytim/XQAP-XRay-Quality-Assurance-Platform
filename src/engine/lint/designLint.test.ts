@@ -120,20 +120,22 @@ describe("design lint", () => {
     const rules = (d: LayoutDoc, k: "errors" | "warnings" | "overruled" = "warnings"): string[] =>
       lintLayout(d, theme)[k].map((i) => (i.detail ?? "").slice(0, 2));
 
-    it("F5: a good or bad bar with no value label and no text beside it is an error; a labelled one passes", () => {
-      const bad = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.bad, categories: [""], values: [null] })]));
-      expect(rules(bad, "errors")).toContain("F5");
-      const ok = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.bad })]));
-      expect(rules(ok, "errors")).not.toContain("F5");
-      const beside = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.good, categories: [""], values: [null] }), tb("legend", { x: 100, y: 710 })]));
-      expect(rules(beside, "errors")).not.toContain("F5");
+    it("F5: a good or bad bar with only a value and category fails; an adjacent status note passes", () => {
+      const only = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.bad })]));
+      expect(rules(only, "errors")).toContain("F5");
+      const note = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.bad }), tb("note", { x: 100, y: 710, lines: [run("متأخر")] })]));
+      expect(rules(note, "errors")).not.toContain("F5");
+      const catName = doc(slide(1, "ملخص ٥", [bar("b", { color: theme.tones.bad }), tb("note", { x: 100, y: 710, lines: [run("أ")] })]));
+      expect(rules(catName, "errors")).toContain("F5");
     });
 
-    it("F5: a good or bad KPI value alone fails; with a label box in its tile it passes", () => {
-      const alone = doc(slide(1, "ملخص ٥", [tb("kpi", { color: theme.tones.good })]));
-      expect(rules(alone, "errors")).toContain("F5");
-      const labelled = doc(slide(1, "ملخص ٥", [tb("kpi", { color: theme.tones.good }), tb("lbl", { y: 470, color: theme.ink.muted })]));
-      expect(rules(labelled, "errors")).not.toContain("F5");
+    it("F5: a good or bad KPI fails with only its label or the slide title near; a status word passes", () => {
+      const labelOnly = doc(slide(1, "ملخص ٥", [tb("kpi", { color: theme.tones.good }), tb("lbl", { visualId: "kpi", y: 470, color: theme.ink.muted })]));
+      expect(rules(labelOnly, "errors")).toContain("F5");
+      const nearTitle = doc(slide(1, "ملخص ٥", [tb("kpi", { color: theme.tones.good, y: 150, h: 60 })]));
+      expect(rules(nearTitle, "errors")).toContain("F5");
+      const status = doc(slide(1, "ملخص ٥", [tb("kpi", { color: theme.tones.good }), tb("st", { y: 470, lines: [run("ضمن المستهدف")] })]));
+      expect(rules(status, "errors")).not.toContain("F5");
     });
 
     it("R1: an eyebrow above the title on more than one slide warns; on one slide it does not", () => {
@@ -147,6 +149,12 @@ describe("design lint", () => {
       expect(rules(doc(slide(1, "ملخص ٥", [tb("t", { lines: [run("CSV Report نص")] })])))).toEqual([]);
     });
 
+    it("R2: spaced-out letters warn; format acronyms are exempt", () => {
+      expect(rules(doc(slide(1, "ملخص ٥", [tb("t", { lines: [run("R E P O R T")] })])))).toEqual(["R2"]);
+      expect(rules(doc(slide(1, "ملخص ٥", [tb("t", { lines: [run("HTML PPTX XLSX PDF CSV KPI")] })])))).toEqual([]);
+      expect(rules(doc(slide(1, "ملخص ٥", [tb("t", { lines: [run("P D F")] })])))).toEqual([]);
+    });
+
     it("R8: a title with no figure warns; one with a figure passes", () => {
       expect(rules(doc(slide(1, "ملخص", [])))).toEqual(["R8"]);
       expect(rules(doc(slide(1, "ملخص 85%", [])))).toEqual([]);
@@ -157,6 +165,9 @@ describe("design lint", () => {
       expect(rules(pair(700))).toEqual(["R9"]);
       expect(rules(pair(400))).toEqual([]);
       expect(rules(doc(slide(1, "ملخص ٥", [table("t", [400, 400]), table("u", [380, 380])])))).toEqual(["R9"]);
+      // An empty header row takes no area: 2 rows of 50 against 1 row of 50 plus an empty header is 2:1, not 4:3.
+      const two = table("t", [400, 400]); two.rows = [[], []];
+      expect(rules(doc(slide(1, "ملخص ٥", [two, table("u", [400, 400])])))).toEqual([]);
     });
 
     it("an overrule with a reason moves R9 to overruled; an empty reason does not; F5 cannot be overruled", () => {

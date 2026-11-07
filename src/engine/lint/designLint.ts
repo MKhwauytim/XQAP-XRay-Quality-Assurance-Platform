@@ -3,7 +3,7 @@ import { LAYOUT } from "../layout/layoutReport";
 import type { Run } from "../layout/bidiRuns";
 import type { BarChartBox, LayoutBox, LayoutDoc, LayoutSlide, TableBox, TextBox } from "../layout/types";
 import type { ThemeTokens } from "../spec/types";
-import { ANY_DIGIT, ARABIC_INDIC_DIGITS, LONG_DASH, MIN_FONT_PX, figureTokens, hexDigits } from "../text";
+import { ANY_DIGIT, ARABIC_INDIC_DIGITS, FORMAT_ACRONYMS, LONG_DASH, MIN_FONT_PX, figureTokens, hexDigits } from "../text";
 
 /**
  * Design lint (spec §4.9), Milestone 1 scope (C20): Floor F1 (contrast, a pure token-pair check), F2 (fit errors
@@ -105,23 +105,27 @@ const ADJACENT_PX = 40;
 const near = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean =>
   b.x < a.x + a.w + ADJACENT_PX && b.x + b.w > a.x - ADJACENT_PX && b.y < a.y + a.h + ADJACENT_PX && b.y + b.h > a.y - ADJACENT_PX;
 
+const HAS_LETTER = /\p{L}/u;
+
 /**
- * F5 (Floor): a good or bad tone is never carried by colour alone. A bar in a good/bad tone must show a value
- * label (a non-null value with a category) or have a text box beside it; a text box (a KPI value) in a good/bad
- * tone must have another non-empty text box inside its tile or beside it. Tone is recognised by colour equal to
- * the theme's good/bad tone, since the layout model carries the resolved colour, not the tone name.
+ * F5 (Floor): a good or bad tone is never carried by colour alone. A bar chart or KPI value drawn in the good or
+ * bad tone passes only if a text box inside it or within 40px holds a status word: text with at least one letter
+ * that is not the slide title, not a category name of that chart, and not the tile's own label (the other text of
+ * the same visual). A value label does not count. Tone is recognised by colour equal to the theme's good/bad tone,
+ * since the layout model carries the resolved colour, not the tone name.
  */
 function f5(slide: LayoutSlide, theme: ThemeTokens): EngineIssue[] {
   const toned = (c: string): boolean => c.toLowerCase() === theme.tones.good.toLowerCase() || c.toLowerCase() === theme.tones.bad.toLowerCase();
-  const texts = slide.boxes.filter((b): b is TextBox => b.kind === "text" && boxText(b) !== "");
+  const title = `s${slide.index}-title`;
+  const words = (self: LayoutBox, visualId: string, names: string[]): TextBox[] =>
+    slide.boxes.filter((t): t is TextBox =>
+      t.kind === "text" && t !== self && t.id !== title && t.visualId !== visualId && HAS_LETTER.test(boxText(t)) &&
+      !names.includes(boxText(t)) && near(self, t));
   const out: EngineIssue[] = [];
   for (const b of slide.boxes) {
-    if (b.kind === "bar" && toned(b.color)) {
-      const valueLabel = b.values.some((v) => v !== null) && b.categories.some((c) => c.trim() !== "");
-      if (!valueLabel && !texts.some((t) => near(b, t))) out.push(lintIssue(slide.index, b.id, "F5: اللون وحده يحمل الدلالة، يلزم نص ظاهر"));
-    } else if (b.kind === "text" && toned(b.color) && boxText(b) !== "") {
-      if (!texts.some((t) => t !== b && near(b, t))) out.push(lintIssue(slide.index, b.id, "F5: اللون وحده يحمل الدلالة، يلزم نص ظاهر"));
-    }
+    const bare = (b.kind === "bar" && toned(b.color) && words(b, b.visualId, b.categories.map((c) => c.trim())).length === 0) ||
+      (b.kind === "text" && toned(b.color) && boxText(b) !== "" && words(b, b.visualId, []).length === 0);
+    if (bare) out.push(lintIssue(slide.index, b.id, "F5: اللون وحده يحمل الدلالة، يلزم كلمة حالة ظاهرة"));
   }
   return out;
 }
@@ -142,11 +146,13 @@ function r1(doc: LayoutDoc): EngineIssue[] {
 }
 
 const LATIN_WORD = /[A-Za-z]{4,}/g;
+const SPACED_LETTERS = /(?<![A-Za-z])[A-Za-z](?: [A-Za-z]){2,}(?![A-Za-z])/g;
 
-/** R2: an all-capitals Latin word longer than 3 letters. */
+/** R2: an all-capitals Latin word over 3 letters, or three or more single letters spaced apart; format acronyms are exempt. */
 function r2(slide: LayoutSlide, theme: ThemeTokens): EngineIssue[] {
   return samples(slide, theme)
-    .filter((s) => (s.text.match(LATIN_WORD) ?? []).some((w) => w === w.toUpperCase()))
+    .filter((s) => (s.text.match(LATIN_WORD) ?? []).some((w) => w === w.toUpperCase() && !FORMAT_ACRONYMS.includes(w)) ||
+      (s.text.match(SPACED_LETTERS) ?? []).some((w) => !FORMAT_ACRONYMS.includes(w.replace(/ /g, "").toUpperCase())))
     .map((s) => lintIssue(slide.index, s.where, "R2: نص لاتيني بأحرف كبيرة كلها"));
 }
 
@@ -156,7 +162,9 @@ function r8(slide: LayoutSlide): EngineIssue[] {
   return figureTokens(t).length === 0 && !ANY_DIGIT.test(t) ? [lintIssue(slide.index, `s${slide.index}-title`, "R8: عنوان بلا رقم")] : [];
 }
 
-const tableArea = (t: TableBox): number => t.colW.reduce((a, c) => a + c, 0) * t.rowH * (t.rows.length + 1);
+/** A table's area; an empty header row takes no space (R9). */
+const tableArea = (t: TableBox): number =>
+  t.colW.reduce((a, c) => a + c, 0) * t.rowH * (t.rows.length + (t.header.some((c) => lineText(c.lines).trim() !== "") ? 1 : 0));
 
 /** R9: two or more charts or tables on a slide and none at least 1.5 times the area of every other. */
 function r9(slide: LayoutSlide): EngineIssue[] {

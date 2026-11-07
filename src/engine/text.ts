@@ -59,3 +59,6 @@ export function withoutTokens(s: string, remove: string[]): string {
     return " ";
   });
 }
+
+/** Common format and metric acronyms that R2 does not flag. */
+export const FORMAT_ACRONYMS: readonly string[] = ["HTML", "PPTX", "XLSX", "PDF", "CSV", "KPI"];
