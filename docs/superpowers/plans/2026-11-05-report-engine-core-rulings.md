@@ -1,0 +1,58 @@
+# Rulings made during Milestone 1 execution
+
+Every decision taken on the owner's behalf while building the engine core, in order: what was decided, why, and the cost if wrong.
+
+- Ruling: narrow the grep to permission, canMutate, AuthRole, userId and named account roles, and skip `*.test.ts` - decision 13 forbids accounts, not a dimension/measure tag - cost if wrong: weaker boundary test, or a rename across tasks.
+- Ruling: scan non-test, non-fixture files only - the constraint covers shipped code - cost if wrong: one-line fix.
+- Ruling: restrict by resolved path (climbing out of `src/engine`) and copy existing patterns into the engine block - boundary still tested by C2 - cost if wrong: lint blocks valid imports.
+- Ruling: T1 creates only the constant; T14 adds the map and exports `createFixedAdvanceMeasurer`, `ENGINE_ACTIONS`, `validateSpec`, `validateRecipe`; drop the orphans - decision 13 needs three actions - cost if wrong: missing export found at T14 build.
+- Ruling: `value` also allows `{ param: string }`; provenance filters carry substituted literals - spec §4.3 - cost if wrong: type change across T2, T4, T5, T10.
+- Ruling: fixture declares `port` required and supplies it - the fixture should exercise the rule - cost if wrong: a fixture edit.
+- Ruling: brackets resolve by `source.header`, then `label`; bare identifier by `id`; AST stores the id; fix the test - decision 11 - cost if wrong: Arabic formulas fail, caught in T3 tests.
+- Ruling: count and distinctCount of an empty set are 0; sum, avg, min, max, ratio, percentOfTotal are null and show `-`; amend Global and T3 - M6 forbids invented figures, a count of nothing is measured - cost if wrong: display-only change in `formatValue`.
+- Ruling: digit, long-dash and emoji scans cover HTML, PPTX, recipe and xlsx processed, stats and source sections, not raw sheets; report skipped hits - M12 is explicit - cost if wrong: raw altered or a processed sheet carries an Arabic-Indic digit.
+- Ruling: Arabic-Indic digits in uploads are converted to Latin (plan Task 2 default) - owner did not object - cost: none
+- Ruling: recipe profiles carry counts only - decision 12 - cost if wrong: uploaded text leaks into a shared file.
+- Ruling: order is resolve, layout, xlsx, html, pptx, gates, recipe; note M11 holds as one source of definitions - cost if wrong: a figure registry rework of T7 and T11.
+- Ruling: signature adds both; a title box on every slide, frames start at row 1 or later; fixture page-1 title becomes body text - M7 - cost if wrong: re-layout of fixture and snapshots.
+- Ruling: step records keep capped removed rows; fixture gets a filter and a dedupe; T5 lists the fixture; calc columns are virtual declarations - M12 - cost if wrong: step sheets show counts only.
+- Ruling: add the column, expect 2 tables, upper-case the first letter, reject collisions with `tblSource` - M3 - cost if wrong: parity gate cannot join figures.
+- Ruling: `checkOoxml` returns issues and counts; `runGates` adds `lint`; add `readXlsxSteps` - M13 gates read files back - cost if wrong: T14 test unsatisfiable.
+- Ruling: follow the test string; non-empty criterion only when no equality covers the column; `ratio` like `/`; the rest return `ok:false` - cost if wrong: a few cells show no formula.
+- Ruling: create `src/engine/xml/tokenize.ts` in T9; normalise embedded workbook dates from `issuedAt` - M13 - cost if wrong: flaky determinism found at T9 step 4.
+- Ruling: put the hyphen last in the class, in Global and `splitRuns` - M5 - cost if wrong: parentheses fall into LTR runs.
+- Ruling: also fail with `type.errors` for errored dimension, filter and calc columns - decision 11 - cost if wrong: stricter issue gate.
+- Ruling: add F1 as a pure token-pair check; F5, Reflex, Finish and browser pass deferred and logged - §4.9 - cost if wrong: contrast unchecked until Milestone 3.
+- Ruling: rows per page is the min of geometry and cells limit over column count; recheck `maxSlides` on layout - M13 - cost if wrong: oversized table pages.
+- Ruling: each body gets a concrete assertion before implementation and review rejects `() => {}` - M13 hostile-input tests - cost if wrong: green suite proving nothing.
+- Ruling: copy pack measures into `spec.model.measures`; recipe keeps `packId` in the spec; document it - decision 11 - cost if wrong: re-issue needs the pack file.
+- Ruling: 1-based slides; cell ids `{boxId}-r{row}c{col}` with `data-box` on each cell - decision 8 - cost if wrong: parity skips table cells.
+- Ruling: no change - guard does not scan .ts - cost if wrong: none.
+- Ruling: rulings C1-C24 applied to plan in afe5a09a; briefs re-cut from it
+- Ruling: build on branch claude/pptx-poc (Excel PoC agent shares this worktree; switching branches would break it); engine commits touch only src/engine, eslint config and package files, so a clean branch can be cut later by cherry-pick - cost: one cherry-pick step before PR
+- Task 1: Ruling: eslint.config.js engine override blocked by config-protection hook; boundary enforced by boundary.test.ts only; surfaced to owner - cost: lint does not catch a bad import, the test does
+- Task 3: Ruling: parseFormula default level stays 'measure'; Task 5 calc-step wiring must pass 'row' and test that sum(...) is rejected - cost: a calc aggregate could slip if forgotten
+- Task 3: Ruling: Task 4 validateSpec must call findMeasureCycle and raise a blocking issue
+- Ruling: owner M15 (2026-11-05): workbook uses human Arabic names only, no step numbers or ids; Task 11 brief must apply M15 and add the id/step-pattern block check - cost: none
+- Task 5: Ruling: dedupe on an errored column keys by raw text (no merge of different bad values) instead of failing closed - fixture s2 requires zero issues; documented exception to C19 - cost: near-identical bad values stay separate rows
+- Task 5: Ruling: layout (Task 7) must identify category cells by value key, not label text (labels may repeat, e.g. two '-')
+- Task 6: Ruling: LTR token may contain .,:/- internally but must end with [A-Za-z0-9%] - sentence punctuation stays Arabic (refines C18) - cost: a token ending in '.' like 'Co.' loses its dot to the RTL run
+- Task 7: Ruling: table totals ARE laid out, as a final total row on the last page only (40 rows still split 15/15/10, the total sits on page 3) - reports must show totals - cost: last page has one more row
+- Task 7: Ruling: dimension cells carry a group key (encoded like valueKey groups) so layout parity and the source sheet can address them
+- Task 8: Ruling: line height belongs in LAYOUT (single source) and HTML, PPTX (spcPts) and layout line math all read it - M2 parity - cost: none
+- Task 8: Ruling: figure attributes are data-value-key / data-group-key (brief's data-value superseded); no display-value attribute
+- Task 8: Ruling: Task 14 issueReport must call themeIssues and fail closed on any result
+- Ruling: owner 2026-11-06: raw section always ships as a companion workbook linked from the report workbook; Task 11 writes two xlsx files and Task 14 outputs six files - cost: one more output file
+- Task 9: Ruling: table cell margins 0 top/bottom, LAYOUT.cellPad left/right, matching HTML padding (M2 parity over brief's literal 0)
+- Task 9: Ruling: long dashes coming from content are caught by the Task 12 lint gate (blocks the issue), not by the PPTX writer
+- Task 10: Ruling: Latin-letter strings with = or <> are refused (Excel case-insensitive) for consistency with C16 - cost: formulas on Latin text columns stay engine-only (no Excel formula), visible as ok:false
+- Task 10: Ruling: brief's quote-doubling test string "a""b" replaced by an Arabic string, because the Latin-string refusal ruling forbids it - cost: none
+- Task 11: Ruling: writeXlsx returns {report, companion, ...}; Arabic table names via tableNameFor/SOURCE_TABLE; key header SOURCE_KEY_HEADER; Tasks 12/14 must use these
+- Task 11: Ruling: header block order (counts at B4:D4 before reads-from and rule) accepted; M15 lists contents, not a strict order
+- Task 12: Ruling: runGates takes report xlsx + required companion + optional recipe (raw lives in companion); Task 14 passes the recipe
+- Task 12: Ruling: digits that come from {{param}} placeholders (e.g. month 2026-05) and from static template text must be registered as non-figures so parity does not block on them; owned by the reviewer finding / fix in Task 12
+- Task 12: Ruling: duplicate valueKeys in source sheet allowed when displays agree (one row per figure placement); block only disagreeing displays
+- Task 12: Ruling: GateInput includes spec; Task 14 passes it; LayoutDoc.nonFigureSpans additive change accepted; dropDanglingOverrides in pptx postprocess accepted
+- Task 12: Ruling: static-text digits are non-figures for parity but raise a non-blocking design-lint warning naming the box (M6 visibility)
+- Task 12: Ruling: trailing all-blank upload rows may cause a false reconcile block (fails closed, never a silent pass); deferred to Milestone 3 with a test - cost: such uploads need the blank tail removed
+- Task 13: Ruling: Task 14 re-issue derives everything from recipe.spec + params and ignores the copied columns/steps/measures, so a divergent copy cannot change output
