@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0 (v0.24.0)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0 (v0.24.0)
         with:
           path: .
           format: cyclonedx-json
@@ -39,7 +39,7 @@ jobs:
           upload-artifact: true
 
       - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0 (v0.24.0)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0 (v0.24.0)
         with:
           path: .
           format: spdx-json
