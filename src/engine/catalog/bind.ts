@@ -41,39 +41,54 @@ function textFor(b: SlotBinding): string {
   return "";
 }
 
-function bindVisual(v: CatalogVisual, bound: Map<string, SlotBinding>, design: CatalogDesign, issues: EngineIssue[]): VisualSpec {
+function bindVisual(v: CatalogVisual, bound: Map<string, SlotBinding>, design: CatalogDesign, flagged: Set<string>, issues: EngineIssue[]): VisualSpec | undefined {
+  const flag = (slotId: string): void => {
+    if (flagged.has(slotId)) return;
+    flagged.add(slotId);
+    issues.push({ rule: "bind.wrongKind", detail: where(design, design.slots.find((s) => s.id === slotId)) });
+  };
   const wells: VisualSpec["wells"] = {};
+  let hollow = false;
   for (const [role, refs] of Object.entries(v.wells) as [WellRole, { slot: string }[]][]) {
     const items: WellItem[] = [];
     for (const ref of refs) {
+      if (design.slots.find((s) => s.id === ref.slot)?.kind === "text") {
+        flag(ref.slot);
+        continue;
+      }
       const b = bound.get(ref.slot);
       if (b === undefined) continue; // unbound required slots are reported once per design
       if ("field" in b) items.push({ field: b.field });
       else if ("measure" in b) items.push({ measure: b.measure });
-      else {
-        const decl = design.slots.find((s) => s.id === ref.slot);
-        issues.push({ rule: "bind.wrongKind", detail: where(design, decl) });
-      }
+      else flag(ref.slot);
     }
+    if (refs.length > 0 && items.length === 0) hollow = true;
     wells[role] = items;
   }
+  // A well emptied by unbound optional slots would render nothing, so the whole visual is dropped.
+  if (hollow) return undefined;
   const out: VisualSpec = { ...v, wells };
   if (v.text !== undefined) {
+    let substituted = false;
     out.text = v.text.replace(SLOT_PLACEHOLDER, (_m, id: string) => {
+      substituted = true;
       const b = bound.get(id);
       return b === undefined ? "" : textFor(b);
     });
+    if (substituted) out.text = out.text.replace(/[^\S\n]{2,}/g, " ").trim();
   }
   return out;
 }
 
 function bindPick(design: CatalogDesign, pick: PickBinding, index: number, issues: EngineIssue[]): PageSpec {
   const bound = new Map<string, SlotBinding>();
+  const flagged = new Set<string>();
   for (const slot of design.slots) {
     const b = pick.slots[slot.id];
     if (b === undefined) {
       if (slot.required) issues.push({ rule: "bind.missingSlot", detail: where(design, slot) });
     } else if (!accepts(slot, b)) {
+      flagged.add(slot.id);
       issues.push({ rule: "bind.wrongKind", detail: where(design, slot) });
     } else bound.set(slot.id, b);
   }
@@ -86,7 +101,9 @@ function bindPick(design: CatalogDesign, pick: PickBinding, index: number, issue
     title: pick.title,
     size: "16:9",
     grid: design.page.grid,
-    visuals: design.page.visuals.map((v) => bindVisual(v, bound, design, issues)),
+    visuals: design.page.visuals
+      .map((v) => bindVisual(v, bound, design, flagged, issues))
+      .filter((v): v is VisualSpec => v !== undefined),
   };
   if (pick.filters !== undefined) page.filters = pick.filters;
   return page;
@@ -108,6 +125,7 @@ export function buildSpecFromPicks(
 ): BindResult {
   const issues: EngineIssue[] = [];
   const pages: PageSpec[] = [];
+  const pageDesigns: CatalogDesign[] = [];
   numbers.forEach((n, i) => {
     const d = getDesign(n, catalog);
     if (!d.ok) {
@@ -120,6 +138,7 @@ export function buildSpecFromPicks(
       return;
     }
     pages.push(bindPick(d.design, pick, i, issues));
+    pageDesigns.push(d.design);
   });
   if (issues.length > 0) return { ok: false, issues };
   const spec: ReportSpec = {
@@ -134,5 +153,13 @@ export function buildSpecFromPicks(
   };
   if (base.filters !== undefined) spec.filters = base.filters;
   const problems = validateSpec(spec, undefined, probeParams(base.params));
-  return problems.length > 0 ? { ok: false, issues: problems } : { ok: true, spec };
+  if (problems.length === 0) return { ok: true, spec };
+  // Names, not ids: tie each page-scoped problem back to the design it came from.
+  const named = problems.map((p): EngineIssue => {
+    const m = /^pages\[(\d+)\]/.exec(p.path ?? "");
+    const design = m ? pageDesigns[Number(m[1])] : undefined;
+    if (design === undefined) return p;
+    return { ...p, detail: p.detail === undefined ? where(design) : `${where(design)} | ${p.detail}` };
+  });
+  return { ok: false, issues: named };
 }

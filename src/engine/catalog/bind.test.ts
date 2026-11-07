@@ -106,4 +106,56 @@ describe("buildSpecFromPicks", () => {
     const i = fail(buildSpecFromPicks([1, 5], [pick(1, { slots: {} }), pick(5, { title: "x" })], base, cat));
     expect(i.map((x) => x.rule)).toEqual(["bind.missingSlot", "bind.missingSlot", "bind.titleNoFigure"]);
   });
+
+  const optDesign = (): CatalogDesign => {
+    const d = design(1);
+    d.slots.push({ id: "grp", nameAr: "التجميع", kind: "dimension", required: false });
+    d.page.visuals.push({
+      visualId: "opt", type: "barChart", frame: { col: 0, row: 4, w: 24, h: 10, z: 2 },
+      wells: { axis: [{ slot: "grp" }], values: [{ slot: "val" }] },
+    });
+    return d;
+  };
+  it("drops a visual whose well is emptied by an unbound optional slot", () => {
+    const r = buildSpecFromPicks([1], [pick(1)], base, [optDesign()]);
+    if (!r.ok) throw new Error(JSON.stringify(r.issues));
+    expect(r.spec.pages[0].visuals.map((v) => v.visualId)).toEqual(["bar", "txt"]);
+    expect(validateSpec(r.spec, undefined, fx.params)).toEqual([]);
+  });
+  it("keeps that visual when the optional slot is bound", () => {
+    const slots = { ...pick(1).slots, grp: { field: "shipMonth" } };
+    const r = buildSpecFromPicks([1], [pick(1, { slots })], base, [optDesign()]);
+    if (!r.ok) throw new Error(JSON.stringify(r.issues));
+    expect(r.spec.pages[0].visuals.map((v) => v.visualId)).toContain("opt");
+  });
+  it("names the design in validateSpec refusals", () => {
+    const i = fail(buildSpecFromPicks([1], [pick(1, { slots: { cat: { field: "nope" }, val: { measure: "totalWeight" } } })], base, cat));
+    expect(i.length).toBeGreaterThan(0);
+    expect(i[0].detail).toContain("1");
+    expect(i[0].detail).toContain("تصميم 1");
+  });
+  it("collapses whitespace left by an empty optional text slot", () => {
+    const slots = { cat: { field: "shipPort" }, val: { measure: "totalWeight" } };
+    const r = buildSpecFromPicks([1], [pick(1, { slots })], base, cat);
+    if (!r.ok) throw new Error(JSON.stringify(r.issues));
+    expect(r.spec.pages[0].visuals[1].text).toBe("الإجمالي {{measure:totalWeight}}");
+  });
+  it("reports a wrong kind once per slot", () => {
+    const d = design(1);
+    d.page.visuals.push({
+      visualId: "bar2", type: "barChart", frame: { col: 0, row: 4, w: 24, h: 10, z: 3 },
+      wells: { axis: [{ slot: "cat" }], values: [{ slot: "val" }] },
+    });
+    const slots = { cat: { field: "shipPort" }, val: { field: "weight" } };
+    const i = fail(buildSpecFromPicks([1], [pick(1, { slots })], base, [d]));
+    expect(i.filter((x) => x.rule === "bind.wrongKind")).toHaveLength(1);
+  });
+  it("refuses a text slot used in a well", () => {
+    const d = design(1);
+    d.page.visuals[0].wells.legend = [{ slot: "note" }];
+    const i = fail(buildSpecFromPicks([1], [pick(1)], base, [d]));
+    expect(i).toHaveLength(1);
+    expect(i[0].rule).toBe("bind.wrongKind");
+    expect(i[0].detail).toContain("الملاحظة");
+  });
 });
