@@ -5,8 +5,8 @@ import type { IssueEnv } from "../issue/issueReport";
 import { layoutOnly } from "../issue/issueReport";
 import { LAYOUT } from "../layout/layoutReport";
 import type { LayoutSlide } from "../layout/types";
-import type { ThemeTokens } from "../spec/types";
-import { buildSpecFromPicks } from "./bind";
+import type { IssueParams, ThemeTokens } from "../spec/types";
+import { buildSpecFromPicks, designNumberOfPage } from "./bind";
 import type { PickBinding, PicksBase } from "./bind";
 import { DEMO_PARAMS, renderDesignDemo } from "./designs/demo";
 import { NOTE_SLOT } from "./designs/shared";
@@ -18,6 +18,8 @@ export interface LookbookPreview {
   bindings: PickBinding[];
   base: PicksBase;
   files: RawFile[];
+  /** The values the report will be issued with; defaults to DEMO_PARAMS. */
+  params?: IssueParams;
 }
 
 export type LookbookResult = { ok: true; html: string } | { ok: false; issues: EngineIssue[] };
@@ -68,11 +70,12 @@ header p { margin-top: 8px; font-size: 17px; line-height: 1.7; color: ${c("muted
 function previewSlides(p: LookbookPreview, env: IssueEnv): { ok: true; byNumber: Map<number, LayoutSlide[]> } | { ok: false; issues: EngineIssue[] } {
   const built = buildSpecFromPicks(p.numbers, p.bindings, p.base);
   if (!built.ok) return built;
-  const r = layoutOnly(built.spec, p.files, DEMO_PARAMS, env);
+  const r = layoutOnly(built.spec, p.files, p.params ?? DEMO_PARAMS, env);
   if (!r.ok) return r;
   const byNumber = new Map<number, LayoutSlide[]>();
   for (const s of r.doc.slides) {
-    const n = Number(/-d(\d+)$/.exec(s.pageId)?.[1]);
+    const n = designNumberOfPage(s.pageId);
+    if (n === undefined) return { ok: false, issues: [{ rule: "catalog.unknownNumber", path: s.pageId }] };
     byNumber.set(n, [...(byNumber.get(n) ?? []), s]);
   }
   return { ok: true, byNumber };

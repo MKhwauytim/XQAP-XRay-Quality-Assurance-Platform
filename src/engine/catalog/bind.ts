@@ -86,6 +86,14 @@ function bindVisual(v: CatalogVisual, bound: Map<string, SlotBinding>, design: C
   return out;
 }
 
+/** The page id a pick becomes; designNumberOfPage reads the number back. */
+export const pageIdFor = (index: number, designNumber: number): string => `p${index + 1}-d${designNumber}`;
+
+export function designNumberOfPage(pageId: string): number | undefined {
+  const m = /^p\d+-d(\d+)$/.exec(pageId);
+  return m ? Number(m[1]) : undefined;
+}
+
 function bindPick(design: CatalogDesign, pick: PickBinding, index: number, issues: EngineIssue[]): PageSpec {
   const bound = new Map<string, SlotBinding>();
   const flagged = new Set<string>();
@@ -103,7 +111,7 @@ function bindPick(design: CatalogDesign, pick: PickBinding, index: number, issue
     issues.push({ rule: "bind.titleNoFigure", detail: where(design) });
   }
   const page: PageSpec = {
-    pageId: `p${index + 1}-d${design.number}`,
+    pageId: pageIdFor(index, design.number),
     title: pick.title,
     size: "16:9",
     grid: design.page.grid,

@@ -7,7 +7,7 @@ import { issueReport } from "../issue/issueReport";
 import type { IssueEnv } from "../issue/issueReport";
 import { createFixedAdvanceMeasurer } from "../layout/measure";
 import { lintOutputText } from "../lint/designLint";
-import { buildSpecFromPicks } from "./bind";
+import { buildSpecFromPicks, designNumberOfPage, pageIdFor } from "./bind";
 import type { PickBinding } from "./bind";
 import { DEMO_NOTE, DEMO_PARAMS, demoInputs } from "./designs/demo";
 import { NOTE_SLOT } from "./designs/shared";
@@ -73,6 +73,30 @@ describe("renderLookbook", () => {
     expect(want.length).toBeGreaterThan(0);
     const previewSections = sections.filter((s) => numbers.some((n) => s.startsWith(`${n}"`))).join("");
     expect(figures(previewSections)).toEqual(want);
+  });
+
+  it("preview uses the report params: a month-filtered page matches issueReport for the same params", async () => {
+    const numbers = [3];
+    const { base, bindings, files } = realInputs(numbers);
+    const paramBase = { ...base, params: [{ id: "month", type: "text" as const, required: true }], filters: [{ field: "month", op: "eq" as const, value: { param: "month" } }] };
+    const params = { issuedAt: DEMO_PARAMS.issuedAt, values: { month: "فبراير" } };
+    const r = renderLookbook(env(), { preview: { numbers, bindings, base: paramBase, files, params } });
+    if (!r.ok) throw new Error(JSON.stringify(r.issues));
+    const built = buildSpecFromPicks(numbers, bindings, paramBase);
+    if (!built.ok) throw new Error(JSON.stringify(built.issues));
+    const issued = await issueReport(built.spec, files, params, env());
+    if (!issued.ok) throw new Error(issued.message);
+    const sec = r.html.split('data-design-number="').find((s) => s.startsWith('3"'))!;
+    expect(figures(sec)).toEqual(figures(issued.files.html));
+    // The filter changed the figures: the unfiltered preview differs.
+    const all = renderLookbook(env(), { preview: { numbers, bindings, base, files } });
+    if (!all.ok) throw new Error(JSON.stringify(all.issues));
+    expect(figures(all.html.split('data-design-number="').find((s) => s.startsWith('3"'))!)).not.toEqual(figures(sec));
+  });
+
+  it("designNumberOfPage reads back pageIdFor and rejects other ids", () => {
+    expect(designNumberOfPage(pageIdFor(2, 7))).toBe(7);
+    expect(designNumberOfPage("cover")).toBeUndefined();
   });
 
   it("an invalid preview binding returns the bind issues", () => {
