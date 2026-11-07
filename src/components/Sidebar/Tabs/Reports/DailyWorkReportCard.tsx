@@ -4,7 +4,8 @@ import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAcc
 import { logError } from "../../../../data/storage/errorLogger";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { loadDailyWorkSource } from "../../../../data/reporting/dailyWork/dailyWorkSource";
-import { buildDailyWorkReport, previousWorkingDay, previousWorkWeek } from "../../../../data/reporting/dailyWork/dailyWorkReport";
+import { buildDailyWorkReport, monthOf, previousDay, previousMonth, previousWeek, weekOf } from "../../../../data/reporting/dailyWork/dailyWorkReport";
+import type { DailyWorkKind } from "../../../../data/reporting/dailyWork/dailyWorkReport";
 import { buildDailyWorkEml, buildDailyWorkEmailHtml, formatReportDay } from "../../../../data/reporting/dailyWork/dailyWorkEmail";
 
 function toInputValue(d: Date): string {
@@ -28,24 +29,34 @@ type Props = {
  * formatted body to the clipboard for pasting into any other mail client.
  */
 export default function DailyWorkReportCard({ directoryHandle, disabled, disabledTitle }: Props) {
-  const [kind, setKind] = useState<"day" | "week">("day");
-  const [day, setDay] = useState(() => toInputValue(previousWorkingDay(new Date())));
-  // Weekly: the picked date's Sunday–Thursday week. The default is the last full week.
-  const [weekEnd, setWeekEnd] = useState(() => toInputValue(previousWorkWeek(new Date()).until));
+  const [kind, setKind] = useState<DailyWorkKind>("day");
+  // Defaults: yesterday, the last full Sunday–Saturday week, the previous month. Weekends count,
+  // because the team sometimes works on Friday and Saturday.
+  const [day, setDay] = useState(() => toInputValue(previousDay(new Date())));
+  const [weekDay, setWeekDay] = useState(() => toInputValue(previousWeek(new Date()).from));
+  const [month, setMonth] = useState(() => toInputValue(previousMonth(new Date()).from).slice(0, 7));
+  const [rangeFrom, setRangeFrom] = useState(() => toInputValue(previousWeek(new Date()).from));
+  const [rangeTo, setRangeTo] = useState(() => toInputValue(previousDay(new Date())));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  /** The report's first and last day for the current choice, or null when the date is invalid. */
+  /** The report's first and last day for the current choice, or null when a date is invalid. */
   function period(): { from: Date; until?: Date } | null {
     if (kind === "day") {
       const d = fromInputValue(day);
       return d ? { from: d } : null;
     }
-    const end = fromInputValue(weekEnd);
-    if (!end) return null;
-    // The week is Sunday–Thursday: back up to the Sunday on or before the picked date, end on its Thursday.
-    const from = new Date(end.getFullYear(), end.getMonth(), end.getDate() - end.getDay());
-    return { from, until: new Date(from.getFullYear(), from.getMonth(), from.getDate() + 4) };
+    if (kind === "week") {
+      const d = fromInputValue(weekDay);
+      return d ? weekOf(d) : null;
+    }
+    if (kind === "month") {
+      const d = fromInputValue(`${month}-01`);
+      return d ? monthOf(d) : null;
+    }
+    const from = fromInputValue(rangeFrom);
+    const until = fromInputValue(rangeTo);
+    return from && until && from <= until ? { from, until } : null;
   }
 
   async function generate(): Promise<void> {
@@ -58,16 +69,20 @@ export default function DailyWorkReportCard({ directoryHandle, disabled, disable
       const source = await loadDailyWorkSource(directoryHandle);
       const names: Record<string, string> = {};
       for (const u of getManagedLoginUsers()) names[u.username] = u.displayName || u.username;
-      const report = buildDailyWorkReport({ months: source.months, day: reportDay, until: p.until, names });
+      const report = buildDailyWorkReport({ months: source.months, day: reportDay, until: p.until, kind, names });
 
       const eml = buildDailyWorkEml(report);
       const url = URL.createObjectURL(new Blob([eml], { type: "message/rfc822" }));
       const a = document.createElement("a");
       a.href = url;
       const fileDate = (d: Date) => formatReportDay(d).date.replace(/\//g, "-");
-      a.download = report.kind === "week"
-        ? `تقرير العمل الأسبوعي ${fileDate(report.day)} إلى ${fileDate(report.until)}.eml`
-        : `تقرير العمل اليومي ${fileDate(reportDay)}.eml`;
+      const fileName: Record<DailyWorkKind, string> = {
+        day: `تقرير العمل اليومي ${fileDate(reportDay)}`,
+        week: `تقرير العمل الأسبوعي ${fileDate(report.day)} إلى ${fileDate(report.until)}`,
+        month: `تقرير العمل الشهري ${month}`,
+        range: `تقرير العمل للفترة ${fileDate(report.day)} إلى ${fileDate(report.until)}`,
+      };
+      a.download = `${fileName[report.kind]}.eml`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
 
@@ -81,7 +96,7 @@ export default function DailyWorkReportCard({ directoryHandle, disabled, disable
       } catch {
         // Clipboard can be refused (no focus / permission); the .eml still works.
       }
-      const parts = [`تم تجهيز الإيميل ${report.kind === "week" ? "الأسبوعي" : "اليومي"} لـ ${report.months.length} شهر — افتح الملف الذي تم تنزيله ليفتح في Outlook جاهزًا للإرسال.`];
+      const parts = [`تم تجهيز الإيميل لـ ${report.months.length} شهر — افتح الملف الذي تم تنزيله ليفتح في Outlook جاهزًا للإرسال.`];
       if (copied) parts.push("ونُسخ نص التقرير أيضًا للصقه في أي بريد.");
       if (source.failedMonths.length) parts.push(`تعذرت قراءة: ${source.failedMonths.join("، ")}.`);
       setStatus(parts.join(" "));
@@ -100,27 +115,44 @@ export default function DailyWorkReportCard({ directoryHandle, disabled, disable
         <div className="rh-card-top">
           <div className="rh-icon rh-icon-teal"><Mail size={22} /></div>
         </div>
-        <div className="rh-card-title">تقرير العمل اليومي والأسبوعي (إيميل)</div>
+        <div className="rh-card-title">تقرير العمل (إيميل): يومي، أسبوعي، شهري أو لفترة</div>
         <p className="rh-card-desc">
           إيميل جاهز للإرسال يغطي جميع الأشهر الموزعة: لكل شهر جدول بالموظفين وعدد ما فحصه وأرشفه كل منهم
-          خلال اليوم أو الأسبوع المحدد، والمتبقي من حصته. اليومي افتراضيًا آخر يوم عمل، والأسبوعي آخر أسبوع عمل (الأحد إلى الخميس).
+          خلال الفترة المختارة، والمتبقي من حصته. أيام الجمعة والسبت محسوبة. الأسبوع من الأحد إلى السبت.
         </p>
         <div className="rh-scope-toggle">
           <label htmlFor="rh-daily-kind">نوع التقرير</label>
-          <select id="rh-daily-kind" value={kind} onChange={(ev) => setKind(ev.target.value === "week" ? "week" : "day")}>
+          <select id="rh-daily-kind" value={kind} onChange={(ev) => setKind(ev.target.value as DailyWorkKind)}>
             <option value="day">يومي</option>
             <option value="week">أسبوعي</option>
+            <option value="month">شهري</option>
+            <option value="range">فترة محددة</option>
           </select>
         </div>
-        {kind === "day" ? (
+        {kind === "day" && (
           <div className="rh-scope-toggle">
             <label htmlFor="rh-daily-day">يوم التقرير</label>
             <input id="rh-daily-day" type="date" value={day} onChange={(ev) => setDay(ev.target.value)} />
           </div>
-        ) : (
+        )}
+        {kind === "week" && (
           <div className="rh-scope-toggle">
             <label htmlFor="rh-weekly-day">أي يوم من الأسبوع</label>
-            <input id="rh-weekly-day" type="date" value={weekEnd} onChange={(ev) => setWeekEnd(ev.target.value)} />
+            <input id="rh-weekly-day" type="date" value={weekDay} onChange={(ev) => setWeekDay(ev.target.value)} />
+          </div>
+        )}
+        {kind === "month" && (
+          <div className="rh-scope-toggle">
+            <label htmlFor="rh-monthly">الشهر</label>
+            <input id="rh-monthly" type="month" value={month} onChange={(ev) => setMonth(ev.target.value)} />
+          </div>
+        )}
+        {kind === "range" && (
+          <div className="rh-scope-toggle">
+            <label htmlFor="rh-range-from">من</label>
+            <input id="rh-range-from" type="date" value={rangeFrom} onChange={(ev) => setRangeFrom(ev.target.value)} />
+            <label htmlFor="rh-range-to">إلى</label>
+            <input id="rh-range-to" type="date" value={rangeTo} onChange={(ev) => setRangeTo(ev.target.value)} />
           </div>
         )}
         {status ? <p className="rh-card-desc" role="status">{status}</p> : null}

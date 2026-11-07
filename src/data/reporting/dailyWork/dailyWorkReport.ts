@@ -36,9 +36,15 @@ export type DailyWorkMonth = {
   totals: DailyWorkTotals;
 };
 
+/**
+ * "day": one calendar day; "week": a Sunday–Saturday week; "month": one calendar month;
+ * "range": any first and last day the user picks. Weekends are included everywhere because the
+ * team sometimes works on Friday and Saturday.
+ */
+export type DailyWorkKind = "day" | "week" | "month" | "range";
+
 export type DailyWorkReport = {
-  /** "day": one working day; "week": a Sunday–Thursday work week. */
-  kind: "day" | "week";
+  kind: DailyWorkKind;
   /** First local calendar day the report covers. */
   day: Date;
   /** Last local calendar day the report covers (same as `day` for a daily report). */
@@ -83,24 +89,43 @@ export function previousWorkingDay(today: Date): Date {
   return d;
 }
 
+/** The calendar day before `today`, weekend days included. */
+export function previousDay(today: Date): Date {
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+}
+
+/** The Sunday–Saturday week that contains `d`. */
+export function weekOf(d: Date): { from: Date; until: Date } {
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+  return { from, until: new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6) };
+}
+
 /**
- * The last full work week before `today`: Sunday to the Thursday before today. On a Sunday this is
- * the week that just ended; mid-week it is still the previous week, so a weekly report never covers
- * a week that is not over.
+ * The last full Sunday–Saturday week before `today`. On a Sunday this is the week that just ended;
+ * mid-week it is still the previous week, so a weekly report never covers a week that is not over.
  */
-export function previousWorkWeek(today: Date): { from: Date; until: Date } {
-  const until = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  do {
-    until.setDate(until.getDate() - 1);
-  } while (until.getDay() !== 4);
-  return { from: new Date(until.getFullYear(), until.getMonth(), until.getDate() - 4), until };
+export function previousWeek(today: Date): { from: Date; until: Date } {
+  return weekOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay() - 1));
+}
+
+/** The calendar month that contains `d`: its first and last day. */
+export function monthOf(d: Date): { from: Date; until: Date } {
+  return { from: new Date(d.getFullYear(), d.getMonth(), 1), until: new Date(d.getFullYear(), d.getMonth() + 1, 0) };
+}
+
+/** The calendar month before the one that contains `today`. */
+export function previousMonth(today: Date): { from: Date; until: Date } {
+  return monthOf(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 }
 
 export function buildDailyWorkReport(input: {
   months: readonly DailyWorkMonthInput[];
+  /** First day of the period. */
   day: Date;
-  /** Last day of a weekly report; left out for a daily report. */
+  /** Last day of the period; left out for a one-day report. */
   until?: Date;
+  /** Defaults to "day" without `until` and "range" with it. */
+  kind?: DailyWorkKind;
   names: Readonly<Record<string, string>>;
 }): DailyWorkReport {
   const until = input.until ?? input.day;
@@ -132,5 +157,5 @@ export function buildDailyWorkReport(input: {
     addInto(grand, totals);
     months.push({ folderName: month.folderName, label: month.label, employees, totals });
   }
-  return { kind: input.until ? "week" : "day", day: input.day, until, months, totals: grand };
+  return { kind: input.kind ?? (input.until ? "range" : "day"), day: input.day, until, months, totals: grand };
 }

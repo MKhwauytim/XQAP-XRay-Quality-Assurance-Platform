@@ -23,17 +23,28 @@ export function formatReportDay(day: Date): { weekday: string; date: string } {
   return { weekday, date };
 }
 
-/** «يوم الخميس 2026/11/05» for a daily report, «من الأحد 2026/11/01 إلى الخميس 2026/11/05» for a weekly one. */
+/**
+ * «يوم الخميس 2026/11/05» for one day, «شهر أكتوبر 2026» for a month, and
+ * «من الأحد 2026/11/01 إلى السبت 2026/11/07» for a week or a picked period.
+ */
 export function reportPeriodText(report: Pick<DailyWorkReport, "kind" | "day" | "until">): string {
   const a = formatReportDay(report.day);
   if (report.kind === "day") return `يوم ${a.weekday} ${a.date}`;
+  if (report.kind === "month") return `شهر ${report.day.toLocaleDateString("ar-SA-u-ca-gregory-nu-latn", { month: "long" })} ${report.day.getFullYear()}`;
   const b = formatReportDay(report.until);
   return `من ${a.weekday} ${a.date} إلى ${b.weekday} ${b.date}`;
 }
 
-/** «اليومي» / «الأسبوعي» and «خلال اليوم» / «خلال الأسبوع». */
+/** The report's name and the «خلال …» wording for each kind of period. */
+const PERIOD_WORDS: Record<DailyWorkReport["kind"], { title: string; within: string }> = {
+  day: { title: "اليومي", within: "خلال اليوم" },
+  week: { title: "الأسبوعي", within: "خلال الأسبوع" },
+  month: { title: "الشهري", within: "خلال الشهر" },
+  range: { title: "للفترة", within: "خلال الفترة" },
+};
+
 function periodWords(kind: DailyWorkReport["kind"]): { title: string; within: string } {
-  return kind === "week" ? { title: "الأسبوعي", within: "خلال الأسبوع" } : { title: "اليومي", within: "خلال اليوم" };
+  return PERIOD_WORDS[kind];
 }
 
 export function dailyWorkSubject(report: Pick<DailyWorkReport, "kind" | "day" | "until">): string {
