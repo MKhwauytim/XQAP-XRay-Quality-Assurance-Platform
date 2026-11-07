@@ -7,7 +7,7 @@ import { evaluateMeasure, measureColumns } from "../formula/evaluate";
 import { parseFormula } from "../formula/parse";
 import { LIMITS } from "../limits";
 import type { IssueParams, MeasureSpec, ReportSpec, VisualSpec, VisualType, WellRole } from "../spec/types";
-import { MEASURE_PLACEHOLDER } from "../text";
+import { MEASURE_PLACEHOLDER, TITLE_VISUAL_ID } from "../text";
 
 type Row = Record<string, Cell>;
 
@@ -314,6 +314,14 @@ export function resolveVisuals(
   for (const d of spec.datasets) issues.push(...(data.get(d.id)?.issues ?? []));
 
   const ctx: Ctx = { spec, data, params, asts, byId, values: new Map(), issues };
-  const visuals = spec.pages.flatMap((page, pi) => page.visuals.map((v) => resolveVisual(ctx, pi + 1, page.filters ?? [], v)));
+  const visuals = spec.pages.flatMap((page, pi) => {
+    const out = page.visuals.map((v) => resolveVisual(ctx, pi + 1, page.filters ?? [], v));
+    // A figure in a page title resolves like a text visual on that page, under the title id.
+    if (page.title.includes("{{measure:")) {
+      const title: VisualSpec = { visualId: TITLE_VISUAL_ID, type: "text", frame: { col: 0, row: 0, w: 24, h: 1, z: 0 }, wells: {}, text: page.title };
+      out.push(resolveVisual(ctx, pi + 1, page.filters ?? [], title));
+    }
+    return out;
+  });
   return { visuals, values: ctx.values, issues };
 }

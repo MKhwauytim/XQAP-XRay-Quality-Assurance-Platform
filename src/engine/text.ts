@@ -62,3 +62,6 @@ export function withoutTokens(s: string, remove: string[]): string {
 
 /** Common format and metric acronyms that R2 does not flag. */
 export const FORMAT_ACRONYMS: readonly string[] = ["HTML", "PPTX", "XLSX", "PDF", "CSV", "KPI"];
+
+/** Visual id of a slide title: its layout box and the resolution of any `{{measure:id}}` in a page title. */
+export const TITLE_VISUAL_ID = "title";

@@ -7,7 +7,7 @@ import { checkPackShape, checkSpecShape } from "./shape";
 import type { DomainPack, IssueParams, MeasureSpec, PageSpec, ReportSpec, VisualSpec, WellItem } from "./types";
 import { WELL_SCHEMAS } from "./wells";
 import { SOURCE_TABLE, excelNameKey, tableNameFor } from "../xlsx/planWorkbook";
-import { ANY_DIGIT, MIN_FONT_PX, PLACEHOLDER } from "../text";
+import { ANY_DIGIT, MIN_FONT_PX, PLACEHOLDER, TITLE_VISUAL_ID } from "../text";
 
 const GRID = { cols: 24, rows: 14 } as const;
 const MEASURE_REF = /@([\p{L}_][\p{L}\p{N}_]*)/gu;
@@ -29,6 +29,7 @@ function textMeasureIds(text: string | undefined): string[] {
 function referencedMeasureIds(spec: ReportSpec): Set<string> {
   const out = new Set<string>();
   for (const page of spec.pages ?? []) {
+    for (const id of textMeasureIds(page.title)) out.add(id);
     for (const v of page.visuals ?? []) {
       for (const items of Object.values(v.wells ?? {})) {
         for (const it of items ?? []) if ("measure" in it) out.add(it.measure);
@@ -255,6 +256,10 @@ function checkPage(ctx: Ctx, p: PageSpec, pi: number): void {
   if (p.size !== "16:9") push(ctx, "schema.invalid", `${path}.size`, String(p.size));
   if (p.grid?.cols !== GRID.cols || p.grid?.rows !== GRID.rows) push(ctx, "schema.invalid", `${path}.grid`);
   if (typeof p.title !== "string" || p.title === "") push(ctx, "schema.invalid", `${path}.title`);
+  else for (const id of textMeasureIds(p.title)) if (!ctx.measureIds.has(id)) push(ctx, "measure.unknown", `${path}.title`, id);
+  p.visuals.forEach((v, vi) => {
+    if (v.visualId === TITLE_VISUAL_ID) push(ctx, "schema.invalid", `${path}.visuals[${vi}].visualId`, `reserved id ${TITLE_VISUAL_ID}`);
+  });
   if (p.visuals.length > LIMITS.maxVisualsPerPage) {
     push(ctx, "limit.visuals", `${path}.visuals`, `${p.visuals.length} > ${LIMITS.maxVisualsPerPage}`, { page: pi + 1 });
   }
