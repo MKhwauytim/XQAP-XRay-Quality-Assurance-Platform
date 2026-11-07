@@ -15,6 +15,8 @@ export const d01Section: CatalogDesign = {
   ],
   page: {
     grid: GRID,
+    // deck3 dividers have no title bar: the heading is the only title.
+    titleRow: false,
     visuals: [
       {
         visualId: "heading", type: "text", frame: { col: 3, row: 4, w: 18, h: 3, z: 1 }, wells: {},

@@ -67,7 +67,13 @@ function bindVisual(v: CatalogVisual, bound: Map<string, SlotBinding>, design: C
   }
   // A well emptied by unbound optional slots would render nothing, so the whole visual is dropped.
   if (hollow) return undefined;
-  const out: VisualSpec = { ...v, wells };
+  const { sort, ...rest } = v;
+  const out: VisualSpec = { ...rest, wells };
+  if (sort !== undefined) {
+    const b = bound.get(sort.slot);
+    if (b !== undefined && "field" in b) out.sort = { by: b.field, dir: sort.dir };
+    else if (b !== undefined && "measure" in b) out.sort = { by: b.measure, dir: sort.dir };
+  }
   if (v.text !== undefined) {
     let substituted = false;
     out.text = v.text.replace(SLOT_PLACEHOLDER, (_m, id: string) => {
@@ -105,6 +111,7 @@ function bindPick(design: CatalogDesign, pick: PickBinding, index: number, issue
       .map((v) => bindVisual(v, bound, design, flagged, issues))
       .filter((v): v is VisualSpec => v !== undefined),
   };
+  if (design.page.titleRow === false) page.titleRow = false;
   if (pick.filters !== undefined) page.filters = pick.filters;
   return page;
 }

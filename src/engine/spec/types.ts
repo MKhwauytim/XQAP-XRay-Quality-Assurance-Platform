@@ -41,6 +41,8 @@ export interface VisualSpec {
   format?: { tone: Tone; sizePx?: number; weight?: 400 | 700 };
   /** Only for `type: "text"`; may hold `{{measure:<id>}}` and `{{param:<id>}}`. */
   text?: string;
+  /** Only for `type: "text"`: a page note (a source line), repeated on every continuation slide of the page. */
+  pageNote?: true;
 }
 
 export interface PageSpec {
@@ -48,6 +50,8 @@ export interface PageSpec {
   title: string;
   size: "16:9";
   grid: { cols: 24; rows: 14 };
+  /** `false` draws no title row (a section divider whose own heading is the title); the title still names the slide. */
+  titleRow?: false;
   filters?: FilterSpec[];
   visuals: VisualSpec[];
 }

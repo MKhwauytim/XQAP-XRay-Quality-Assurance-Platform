@@ -15,6 +15,12 @@ const env = (): IssueEnv => ({ theme: structuredClone(FIXTURE_THEME), measurer: 
 const shownText = (doc: LayoutDoc): string[] =>
   doc.slides.flatMap((s) => s.boxes.flatMap((b) => (b.kind === "text" ? [b.lines.map((l) => l.map((r) => r.text).join("")).join(" ")] : [])));
 
+const byNumber = (n: number) => {
+  const d = activeDesigns().find((x) => x.number === n);
+  if (d === undefined) throw new Error(`no design ${n}`);
+  return d;
+};
+
 describe("catalog designs", () => {
   it("has designs 1 to 5 active", () => {
     expect(activeDesigns().map((d) => d.number)).toEqual([1, 2, 3, 4, 5]);
@@ -57,6 +63,45 @@ describe("catalog designs", () => {
     const doc = renderDesignDemo(d, env(), { repeat: 3 });
     expect(doc.slides.length).toBeGreaterThan(1);
     expect(catalogEntryGate(doc, FIXTURE_THEME, d.overrules).issues).toEqual([]);
+  });
+
+  it("design 4 carries the note on every continued slide", () => {
+    const doc = renderDesignDemo(byNumber(4), env(), { repeat: 3 });
+    expect(doc.slides.length).toBeGreaterThan(1);
+    for (const s of doc.slides) expect(shownText({ ...doc, slides: [s] }), `slide ${s.index}`).toContain(DEMO_NOTE);
+  });
+
+  it("bars in designs 3 and 5 rank by value, highest first", () => {
+    for (const n of [3, 5]) {
+      const bar = renderDesignDemo(byNumber(n), env()).slides[0].boxes.find((b) => b.kind === "bar");
+      if (bar?.kind !== "bar") throw new Error(`design ${n} has no bar`);
+      const vals = bar.values.map((v) => v ?? 0);
+      expect(vals, `design ${n}`).toEqual([...vals].sort((a, b) => b - a));
+    }
+  });
+
+  it("design 4 rows run in calendar month order", () => {
+    const table = renderDesignDemo(byNumber(4), env()).slides[0].boxes.find((b) => b.kind === "table");
+    if (table?.kind !== "table") throw new Error("no table");
+    const months = table.rows.map((r) => r[0].lines.map((l) => l.map((x) => x.text).join("")).join("")).filter((t) => t !== "الإجمالي");
+    expect([...new Set(months)]).toEqual(["يناير", "فبراير", "مارس"]);
+  });
+
+  it("design 1 has a single title text, its heading", () => {
+    const doc = renderDesignDemo(byNumber(1), env());
+    expect(doc.slides[0].boxes.some((b) => b.id === "s1-title")).toBe(false);
+    expect(doc.slides[0].boxes.some((b) => b.kind === "rule")).toBe(false);
+    expect(shownText(doc).filter((t) => t.includes("نتائج المطابقة في المنافذ"))).toHaveLength(1);
+  });
+
+  it("titles of designs 2 and 5 state a figure the band does not show", () => {
+    for (const n of [2, 5]) {
+      const doc = renderDesignDemo(byNumber(n), env());
+      const titleKeys = doc.figures.filter((f) => f.boxId === "s1-title").map((f) => f.valueKey);
+      const bandKeys = doc.figures.filter((f) => f.boxId !== "s1-title").map((f) => f.valueKey);
+      expect(titleKeys.length).toBeGreaterThan(0);
+      for (const k of titleKeys) expect(bandKeys, `design ${n}`).not.toContain(k);
+    }
   });
 
   it("demo text uses no long dash", () => {

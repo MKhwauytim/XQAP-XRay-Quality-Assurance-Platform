@@ -20,12 +20,13 @@ export const d05KpiBars: CatalogDesign = {
     grid: GRID,
     visuals: [
       {
-        visualId: "band", type: "kpiBand", frame: { col: 0, row: 1, w: 24, h: 3, z: 1 },
+        visualId: "band", type: "kpiBand", frame: { col: 0, row: 2, w: 24, h: 3, z: 1 },
         wells: { values: [{ slot: "kpi1" }, { slot: "kpi2" }, { slot: "kpi3" }] },
       },
       {
-        visualId: "bars", type: "barChart", frame: { col: 1, row: 4, w: 22, h: 9, z: 1 },
+        visualId: "bars", type: "barChart", frame: { col: 0, row: 5, w: 24, h: 8, z: 1 },
         wells: { axis: [{ slot: "category" }], values: [{ slot: "value" }] },
+        sort: { slot: "value", dir: "desc" },
       },
       noteVisual(),
     ],

@@ -27,20 +27,20 @@ const MONTHS = ["يناير", "فبراير", "مارس"];
 
 export const DEMO_PARAMS: IssueParams = { issuedAt: "2026-11-07T09:00:00Z", values: {} };
 
-/** 4 ports x 3 months = 12 rows; `repeat` (1 to 3) widens to 4 x repeat ports, for pagination checks. */
+/** 4 ports x 3 months = 12 rows (رقم الشهر orders the months); `repeat` (1 to 3) widens to 4 x repeat ports, for pagination checks. */
 function demoFiles(repeat: number): RawFile[] {
   const rows: (string | number)[][] = [];
   PORTS.slice(0, 4 * repeat).forEach((port, p) => {
     MONTHS.forEach((month, m) => {
       const i = p * MONTHS.length + m;
       const count = 120 + ((i * 37) % 90);
-      rows.push([port, month, count, count - ((i * 7) % 19) - 3]);
+      rows.push([port, month, m + 1, count, count - ((i * 7) % 19) - 3]);
     });
   });
   return [{
     fileName: FILE,
     bytesSha256: "d".repeat(64),
-    sheets: [{ sheetName: SHEET, headers: ["المنفذ", "الشهر", "العدد", "المطابق"], rows }],
+    sheets: [{ sheetName: SHEET, headers: ["المنفذ", "الشهر", "رقم الشهر", "العدد", "المطابق"], rows }],
   }];
 }
 
@@ -55,7 +55,7 @@ const DATASET: DatasetDef = {
   id: "demo",
   label: "بيانات توضيحية",
   files: [FILE],
-  columns: [col("port", "المنفذ", "text"), col("month", "الشهر", "text"), col("count", "العدد", "number"), col("matched", "المطابق", "number")],
+  columns: [col("port", "المنفذ", "text"), col("month", "الشهر", "text"), col("monthNo", "رقم الشهر", "number"), col("count", "العدد", "number"), col("matched", "المطابق", "number")],
   steps: [],
 };
 
@@ -65,6 +65,7 @@ const MEASURES: MeasureSpec[] = [
   { id: "matched", label: "الحاويات المطابقة", datasetId: "demo", formula: "sum([المطابق])", format: int },
   { id: "matchRate", label: "نسبة المطابقة", datasetId: "demo", formula: "@matched / @studied", format: { kind: "pct", digits: 1 } },
   { id: "ports", label: "المنافذ", datasetId: "demo", formula: "distinctCount([المنفذ])", format: int },
+  { id: "monthOrder", label: "ترتيب الشهر", datasetId: "demo", formula: "min([رقم الشهر])", format: int },
 ];
 
 /** Per design: the pick title and slot bindings. The note slot is added for every design. */
@@ -75,7 +76,7 @@ const PICKS: Record<number, { title: string; slots: Record<string, SlotBinding> 
   },
   2: {
     title: "بلغت نسبة المطابقة {{measure:matchRate}} في الربع",
-    slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "matchRate" }, kpi4: { measure: "ports" } },
+    slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "ports" } },
   },
   3: {
     title: "نسبة المطابقة {{measure:matchRate}} عبر المنافذ",
@@ -83,11 +84,11 @@ const PICKS: Record<number, { title: string; slots: Record<string, SlotBinding> 
   },
   4: {
     title: "{{measure:studied}} حاوية مدروسة حسب المنفذ والشهر",
-    slots: { row1: { field: "port" }, row2: { field: "month" }, value1: { measure: "studied" }, value2: { measure: "matched" }, value3: { measure: "matchRate" } },
+    slots: { row1: { field: "month" }, row2: { field: "port" }, rowOrder: { measure: "monthOrder" }, value1: { measure: "studied" }, value2: { measure: "matched" }, value3: { measure: "matchRate" } },
   },
   5: {
-    title: "{{measure:matched}} حاوية مطابقة من {{measure:studied}}",
-    slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "matchRate" }, category: { field: "port" }, value: { measure: "studied" } },
+    title: "نسبة المطابقة {{measure:matchRate}} في المنافذ الأربعة",
+    slots: { kpi1: { measure: "studied" }, kpi2: { measure: "matched" }, kpi3: { measure: "ports" }, category: { field: "port" }, value: { measure: "studied" } },
   },
 };
 

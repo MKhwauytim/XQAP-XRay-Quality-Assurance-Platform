@@ -12,9 +12,11 @@ export interface SlotDecl {
 export type SlotRef = { slot: string };
 
 /** A visual whose wells point at slots instead of fields; `text` may hold `{{slot:<id>}}`. */
-export type CatalogVisual = Omit<VisualSpec, "wells" | "text"> & {
+export type CatalogVisual = Omit<VisualSpec, "wells" | "text" | "sort"> & {
   wells: Partial<Record<WellRole, SlotRef[]>>;
   text?: string;
+  /** Sort by the field or measure bound to a slot; dropped when that optional slot is unbound. */
+  sort?: { slot: string; dir: "asc" | "desc" };
 };
 
 export interface CatalogDesign {
@@ -25,6 +27,6 @@ export interface CatalogDesign {
   status: DesignStatus;
   retiredReasonAr?: string;
   slots: SlotDecl[];
-  page: { grid: PageSpec["grid"]; visuals: CatalogVisual[] };
+  page: { grid: PageSpec["grid"]; titleRow?: false; visuals: CatalogVisual[] };
   overrules?: { rule: string; reasonAr: string }[];
 }

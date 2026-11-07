@@ -102,9 +102,12 @@ export function layoutReport(
       const pages = tables.get(v);
       return pages ? (pages[0]?.(slide, false) ?? []) : visualBoxes(ctx, slide, v, byId.get(v.visualId));
     })));
+    const notes = sorted.filter(({ v }) => v.type === "text" && v.pageNote === true);
     for (let k = 1; k <= extra; k++) {
-      slides.push(makeSlide(ctx, page, titleCells, slides.length + 1, true, (slide) =>
-        [...tables.values()].flatMap((p) => p[k]?.(slide, true) ?? [])));
+      slides.push(makeSlide(ctx, page, titleCells, slides.length + 1, true, (slide) => [
+        ...[...tables.values()].flatMap((p) => p[k]?.(slide, true) ?? []),
+        ...notes.flatMap(({ v }) => visualBoxes(ctx, slide, v, byId.get(v.visualId))),
+      ]));
     }
   });
   if (slides.length > LIMITS.maxSlides) {
@@ -171,6 +174,7 @@ function makeSlide(
   const title = `${fill(ctx, page.title, titleCells, used)}${continued ? CONTINUED : ""}`;
   const row0 = safeFrame({ col: 0, row: 0, w: 24, h: 1, z: 0 });
   const frame = { ...row0, h: row0.h - LAYOUT.ruleGap };
+  if (page.titleRow === false) return { index, pageId: page.pageId, title, boxes: body(index) };
   const titleBox = textBox(ctx, index, `s${index}-title`, TITLE_VISUAL_ID, frame, title, {
     sizePx: LAYOUT.titlePx, weight: 700, color: ctx.theme.ink.navy, maxLines: 1,
   }, used.map((u) => u.key), false);

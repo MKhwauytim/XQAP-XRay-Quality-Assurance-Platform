@@ -17,8 +17,9 @@ export const d03Bars: CatalogDesign = {
     grid: GRID,
     visuals: [
       {
-        visualId: "bars", type: "barChart", frame: { col: 1, row: 1, w: 22, h: 12, z: 1 },
+        visualId: "bars", type: "barChart", frame: { col: 1, row: 2, w: 22, h: 11, z: 1 },
         wells: { axis: [{ slot: "category" }], values: [{ slot: "value" }] },
+        sort: { slot: "value", dir: "desc" },
       },
       noteVisual(),
     ],
