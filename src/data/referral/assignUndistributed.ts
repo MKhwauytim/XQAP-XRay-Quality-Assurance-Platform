@@ -8,7 +8,11 @@
  * distribution screen writes, with no request to approve.
  *
  * Re-derived from disk: an id that has an entry by now (another admin
- * distributed it meanwhile) is skipped, never assigned twice.
+ * distributed it meanwhile) is skipped. That check is read-then-append with no
+ * cross-machine lock: two admins assigning the SAME undistributed ids at the
+ * same moment could both write, and the fold keeps the later event. The tool
+ * is admin-only (one admin in practice), the same exposure the distribution
+ * screen's own bulk assign has.
  */
 import { buildAssignEvent } from "../distribution/distributionLog";
 import {
@@ -17,6 +21,8 @@ import {
   refreshDistributionCacheAfterWrite,
 } from "../distribution/distributionStorage";
 import { ensureMonthWritable } from "../population/monthLock";
+import { readUserManagementState } from "../../auth/userManagement";
+import { findAssignableEmployee } from "../distribution/bulkAssignment";
 import { liveSampleRows, loadSampleMaster } from "../sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
@@ -34,6 +40,9 @@ export async function assignUndistributedCases(
   now: Date = new Date()
 ): Promise<AssignUndistributedResult> {
   if (xrayImageIds.length === 0) return { ok: true, assigned: 0, skipped: 0 };
+  if (!findAssignableEmployee(assignedTo, readUserManagementState().users)) {
+    return { ok: false, error: "الموظف المحدد غير موجود، أو غير نشط، أو لا يملك صلاحية استلام العينات." };
+  }
   await ensureMonthWritable(directoryHandle, monthFolderName);
   const sample = await loadSampleMaster(directoryHandle, monthFolderName);
   if (!sample) return { ok: false, error: "تعذر تحميل ملف العينة الرئيسية للشهر." };

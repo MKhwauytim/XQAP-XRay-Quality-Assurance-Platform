@@ -26,6 +26,7 @@ import { loadAllEmployeeFiles } from "../answers/answerStorage";
 import { assignAdhocPlan, ensureAdhocSampleMaster } from "../adhocImport/adhocDistributionBridge";
 import { EXCEL_FILLABLE_FIELDS, EXCEL_INTO_MONTH_FIELD_CATALOG } from "../adhocImport/adhocFieldCatalog";
 import {
+  adhocMonthFolder,
   namespacedXrayImageId,
   type AdhocMappedRow,
   type AdhocRecord,
@@ -38,11 +39,26 @@ import { loadDistributionLog, loadOrDeriveDistributionCurrent, refreshDistributi
 import { invalidateMonthLockCache, isMonthClosed } from "../population/monthLock";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { liveSampleRows, loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
+import type { SampleMasterData } from "../sampling/sampleTypes";
 import { casLoop } from "../storage/casLoop";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
 import { safeWriteJson } from "../storage/safeWrite";
 import { getSampleMainDir } from "../workspace/workspacePaths";
+
+/**
+ * A split row moved back to the index by the queue's bulk move. Marked invalid
+ * (not `excludedByAdmin`): `ensureAdhocSampleMaster` re-projects every VALID
+ * row, excluded ones included, so only an invalid row stays out of the store.
+ */
+export const MOVED_TO_INDEX_REASON = "نُقلت إلى مستهدف المؤشر";
+
+/** totalActual and the CertScan split recomputed from the live rows (rows − replacedRowIds). */
+export function withLiveTotals(sample: SampleMasterData): SampleMasterData {
+  const live = liveSampleRows(sample);
+  const certScanActual = live.filter((row) => row.certScanStatus === "Certscan").length;
+  return { ...sample, totalActual: live.length, certScanActual, nonCertScanActual: live.length - certScanActual };
+}
 
 /** Marks a record this tool created, so a re-run can find what it already moved. */
 export const SPLIT_FILE_PREFIX = "split-";
@@ -65,7 +81,7 @@ export type SplitPlan = {
 
 export type SplitPlanResult =
   | { ok: true; plan: SplitPlan }
-  | { ok: false; reason: "month-closed" | "no-sample" };
+  | { ok: false; reason: "month-closed" | "no-sample" | "empty-list" };
 
 /**
  * Studied = completed, or any answer (a draft too) in the store; assigned =
@@ -99,6 +115,8 @@ export async function planSplitMonth(
   month: string,
   listIds: readonly string[] | null
 ): Promise<SplitPlanResult> {
+  // An empty list would mark every unstudied case "not listed" and move it.
+  if (listIds !== null && !listIds.some((id) => id.trim() !== "")) return { ok: false, reason: "empty-list" };
   invalidateMonthLockCache();
   if (await isMonthClosed(directoryHandle, month).catch(() => false)) return { ok: false, reason: "month-closed" };
   const sample = await loadSampleMaster(directoryHandle, month);
@@ -151,28 +169,43 @@ async function splitRecords(directoryHandle: DirectoryHandleLike, month: string)
   return out;
 }
 
-/** Ids an earlier split of this month already moved, so a re-run never moves one twice. */
+/**
+ * Ids an earlier split of this month already moved, so a re-run never moves
+ * one twice. A record saved before its store was written (a failed
+ * `ensureAdhocSampleMaster`) is projected again first, so an id counts as
+ * moved only once it is really in the exceptional store; otherwise step 3
+ * would remove it from the month while it is nowhere else.
+ */
 async function alreadyMovedIds(directoryHandle: DirectoryHandleLike, month: string): Promise<Set<string>> {
   const ids = new Set<string>();
   for (const record of await splitRecords(directoryHandle, month)) {
-    // An excluded row was moved back to the index; it may be moved out again.
-    for (const row of record.rows) if (row.mapped.xrayImageId && !row.excludedByAdmin) ids.add(row.mapped.xrayImageId);
+    await ensureAdhocSampleMaster(directoryHandle, record);
+    const stored = new Set(((await loadSampleMaster(directoryHandle, adhocMonthFolder(record.importId)))?.rows ?? [])
+      .map((row) => row.xrayImageId));
+    // An invalid row was moved back to the index; it may be moved out again.
+    for (const row of record.rows) {
+      const id = row.mapped.xrayImageId;
+      if (id && row.validation.valid && stored.has(namespacedXrayImageId(record.importId, id, 0))) ids.add(id);
+    }
   }
   return ids;
 }
 
 /** xrayImageId → the employee its latest assign/reassign event in the month names. */
 async function lastAssignees(directoryHandle: DirectoryHandleLike, month: string): Promise<Map<string, string>> {
-  const latest = new Map<string, { at: string; user: string }>();
+  const latest = new Map<string, { at: string; user: string | null }>();
   const log = await loadDistributionLog(directoryHandle, month);
   for (const event of log?.events ?? []) {
-    if (event.eventType !== "assigned" && event.eventType !== "reassigned") continue;
-    const user = event.reassignedTo ?? event.assignedTo;
-    if (!user) continue;
     const prev = latest.get(event.xrayImageId);
-    if (!prev || event.eventAt >= prev.at) latest.set(event.xrayImageId, { at: event.eventAt, user });
+    if (prev && event.eventAt < prev.at) continue;
+    if (event.eventType === "assigned" || event.eventType === "reassigned") {
+      latest.set(event.xrayImageId, { at: event.eventAt, user: event.reassignedTo ?? event.assignedTo ?? null });
+    } else if (event.eventType === "replaced") {
+      // A replaced image left the sample; nobody owns it any more.
+      latest.set(event.xrayImageId, { at: event.eventAt, user: null });
+    }
   }
-  return new Map([...latest].map(([id, value]) => [id, value.user]));
+  return new Map([...latest].flatMap(([id, value]) => (value.user ? [[id, value.user] as [string, string]] : [])));
 }
 
 /** Unassigned rows of a split record whose month assignee is known. */
@@ -182,7 +215,7 @@ function restorePlan(record: AdhocRecord, assignees: ReadonlyMap<string, string>
   for (const row of record.rows) {
     const id = row.mapped.xrayImageId;
     const user = id ? assignees.get(id) : undefined;
-    if (!id || !user || row.assignments.length > 0 || row.excludedByAdmin) continue;
+    if (!id || !user || row.assignments.length > 0 || row.excludedByAdmin || !row.validation.valid) continue;
     plan.push({ rowKey: row.rowKey, username: user, replicaIndex: 0, xrayImageId: namespacedXrayImageId(record.importId, id, 0) });
   }
   return plan;
@@ -217,7 +250,7 @@ async function restoreAssignments(
 
 export type SplitResult =
   | { ok: true; plan: SplitPlan; importId: string | null; moved: number; restored: number; unrestored: number }
-  | { ok: false; reason: "month-closed" | "no-sample" }
+  | { ok: false; reason: "month-closed" | "no-sample" | "empty-list" }
   | { ok: false; reason: "write-failed"; error: string };
 
 export async function executeSplitMonth(
@@ -231,6 +264,9 @@ export async function executeSplitMonth(
   if (!planned.ok) return planned;
   const { plan } = planned;
   try {
+    // Every run first re-projects earlier split records, so a record whose
+    // store write was lost is repaired even when nothing new moves.
+    await alreadyMovedIds(directoryHandle, month);
     if (plan.moved.length === 0) {
       const back = plan.restorable > 0
         ? await restoreAssignments(directoryHandle, month, actor)
@@ -300,7 +336,7 @@ export async function moveRowsToExceptional(
         const next = { ...current, rows };
         const nextRevision = (current.revision ?? 0) + 1;
         const write = await saveSampleMaster(directoryHandle, month, {
-          ...next, totalActual: liveSampleRows(next).length, revision: nextRevision, _writeToken: writeToken,
+          ...withLiveTotals(next), revision: nextRevision, _writeToken: writeToken,
         });
         if (!write.ok) return { done: false };
         const verify = await loadSampleMaster(directoryHandle, month);

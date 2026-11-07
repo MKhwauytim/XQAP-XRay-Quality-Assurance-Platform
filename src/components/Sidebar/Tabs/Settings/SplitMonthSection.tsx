@@ -109,8 +109,10 @@ export function SplitMonthSection() {
     }
   }
 
-  const refusal = (reason: "month-closed" | "no-sample") =>
-    reason === "month-closed" ? L.merge_month_refused_target_closed : L.merge_month_refused_target_no_sample;
+  const refusal = (reason: "month-closed" | "no-sample" | "empty-list") =>
+    reason === "empty-list"
+      ? L.split_month_empty_list
+      : reason === "month-closed" ? L.merge_month_refused_target_closed : L.merge_month_refused_target_no_sample;
 
   async function preview(): Promise<void> {
     if (!directoryHandle || !month) return;
@@ -150,12 +152,17 @@ export function SplitMonthSection() {
       });
       notifyLocalDataChange(["manifest"]);
       broadcastDataRefresh("manual");
-      downloadReport(result.plan, L);
       setPlan(null);
       setNotice({
         kind: result.unrestored > 0 ? "error" : "ok",
         text: fill(L.split_month_done, { moved: result.moved, restored: result.restored, unrestored: result.unrestored, month }),
       });
+      // After the committed split is reported: a failed download must not read as a failed split.
+      try {
+        downloadReport(result.plan, L);
+      } catch (error) {
+        logError("settings:split-month-report", error);
+      }
     } catch (error) {
       logError("settings:split-month", error);
       setNotice({ kind: "error", text: fill(L.excel_rows_failed, { error: errorText(error) }) });

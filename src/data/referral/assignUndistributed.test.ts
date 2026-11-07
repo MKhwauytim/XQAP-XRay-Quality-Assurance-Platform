@@ -66,12 +66,18 @@ describe("bulk assign of undistributed cases", () => {
     const before = await loadOrDeriveDistributionCurrent(root, JAN, (await loadSampleMaster(root, JAN))!.rows);
     expect(undistributedEntries(await loadSampleMaster(root, JAN), before!.entries).map((e) => e.xrayImageId)).toEqual(["S2", "S3"]);
 
-    const result = await assignUndistributedCases(root, JAN, ["S1", "S2", "S3"], "jamila", "admin");
+    const result = await assignUndistributedCases(root, JAN, ["S1", "S2", "S3"], "jalgahamdi", "admin");
     expect(result).toEqual({ ok: true, assigned: 2, skipped: 1 });
 
     const after = await loadOrDeriveDistributionCurrent(root, JAN, (await loadSampleMaster(root, JAN))!.rows);
-    expect(Object.fromEntries(after!.entries.map((e) => [e.xrayImageId, e.assignedTo]))).toEqual({ S1: "emp1", S2: "jamila", S3: "jamila" });
+    expect(Object.fromEntries(after!.entries.map((e) => [e.xrayImageId, e.assignedTo]))).toEqual({ S1: "emp1", S2: "jalgahamdi", S3: "jalgahamdi" });
     // A second click assigns nothing twice.
-    expect(await assignUndistributedCases(root, JAN, ["S2", "S3"], "other", "admin")).toEqual({ ok: true, assigned: 0, skipped: 2 });
+    expect(await assignUndistributedCases(root, JAN, ["S2", "S3"], "hihaloraini", "admin")).toEqual({ ok: true, assigned: 0, skipped: 2 });
+  });
+
+  it("refuses an employee who is not on the roster", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root, JAN, ["S1"], ["S1"]);
+    expect(await assignUndistributedCases(root, JAN, ["S1"], "nobody", "admin")).toMatchObject({ ok: false });
   });
 });

@@ -31,12 +31,16 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
 import { safeWriteJson } from "../storage/safeWrite";
 import { getSampleMainDir } from "../workspace/workspacePaths";
-import { moveRowsToExceptional, studiedAndAssigned } from "./splitMonthByIndexList";
+import { MOVED_TO_INDEX_REASON, moveRowsToExceptional, studiedAndAssigned, withLiveTotals } from "./splitMonthByIndexList";
+import { readUserManagementState } from "../../auth/userManagement";
+import { findAssignableEmployee } from "../distribution/bulkAssignment";
 
 export type MoveResult =
-  | { ok: true; moved: number; skippedStudied: number; unrestored: number }
+  /** `skipped`: ids not found, fan-out copies, or already gone. */
+  | { ok: true; moved: number; skippedStudied: number; unrestored: number; skipped?: number }
   | { ok: false; reason: "month-closed" | "no-sample" }
-  | { ok: false; reason: "write-failed"; error: string };
+  /** `moved`: cases already moved by earlier imports before the failure. */
+  | { ok: false; reason: "write-failed"; error: string; moved?: number };
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -65,7 +69,8 @@ export async function moveIndexCasesToExceptional(
   }
 }
 
-export type ExceptionalCase = { importId: string; xrayImageId: string; assignedTo: string };
+/** `assignedTo` "" or null: the case joins the index unassigned. */
+export type ExceptionalCase = { importId: string; xrayImageId: string; assignedTo: string | null };
 
 function toMonthRow(row: AdhocPreparedRow): PreparedPopulationRow {
   const { adhocSourceRowKey: _key, adhocReplicaIndex: _replica, ...rest } = row;
@@ -87,37 +92,63 @@ export async function moveExceptionalCasesToIndex(
   if (!(await loadSampleMaster(directoryHandle, month))) return { ok: false, reason: "no-sample" };
   const byImport = new Map<string, ExceptionalCase[]>();
   for (const item of cases) byImport.set(item.importId, [...(byImport.get(item.importId) ?? []), item]);
+  const roster = readUserManagementState().users;
 
   let moved = 0;
   let skippedStudied = 0;
+  let skipped = 0;
   try {
     for (const [importId, items] of byImport) {
       const store = adhocMonthFolder(importId);
       const storeSample = await loadSampleMaster(directoryHandle, store);
       const record = await loadAdhocRecord(directoryHandle, importId);
-      if (!storeSample || !record) continue;
+      if (!storeSample || !record) {
+        skipped += items.length;
+        continue;
+      }
       const { studied } = await studiedAndAssigned(directoryHandle, store, storeSample.rows);
       const wanted = new Map(items.map((item) => [item.xrayImageId, item.assignedTo]));
       const rows = (storeSample.rows as AdhocPreparedRow[]).filter((row) => wanted.has(row.xrayImageId));
-      const movable = rows.filter((row) => !studied.has(row.xrayImageId));
-      skippedStudied += rows.length - movable.length;
+      skipped += items.length - rows.length;
+      // A fan-out copy (replica > 0) is a second reviewer of the same image;
+      // the month holds one row per image, so only the primary copy moves.
+      const primary = rows.filter((row) => (row.adhocReplicaIndex ?? 0) === 0);
+      skipped += rows.length - primary.length;
+      const movable = primary.filter((row) => !studied.has(row.xrayImageId));
+      skippedStudied += primary.length - movable.length;
       if (movable.length === 0) continue;
 
-      // 1. Into the month, each with its employee.
+      // 1. Exclude them in the record FIRST: if a later step fails, no save
+      //    re-projects them into the store, and a re-run moves them again.
+      const movedKeys = new Set(movable.map((row) => row.adhocSourceRowKey));
+      await saveAdhocRecord(directoryHandle, {
+        ...record,
+        rows: record.rows.map((row) => (movedKeys.has(row.rowKey)
+          ? { ...row, validation: { valid: false as const, reason: MOVED_TO_INDEX_REASON }, assignments: [] }
+          : row)),
+      });
+
+      // 2. Into the month; an id the month already has keeps its own owner.
       const monthRows = movable.map(toMonthRow);
-      await appendPopulationFinalRows(directoryHandle, month, monthRows as unknown as Array<Record<string, unknown>>, actor);
+      const population = await appendPopulationFinalRows(directoryHandle, month, monthRows as unknown as Array<Record<string, unknown>>, actor);
+      if (population.status === "absent") throw new Error("لا توجد بيانات مجتمع لهذا الشهر.");
       const appended = await appendSampleRows(directoryHandle, month, monthRows);
       if (!appended.ok) throw new Error(appended.error);
+      const fresh = new Set(appended.appended);
       const eventAt = now.toISOString();
-      const events = movable.map((row) => buildAssignEvent({
-        xrayImageId: originalXrayImageIdAnyImport(row.xrayImageId), assignedTo: wanted.get(row.xrayImageId) as string,
-        eventBy: actor, eventAt,
-      }));
-      const written = await appendDistributionEvents(directoryHandle, month, events);
-      if (!written.ok) throw new Error("تعذّر تسجيل توزيع الحالات في الشهر.");
+      const events = movable.flatMap((row) => {
+        const id = originalXrayImageIdAnyImport(row.xrayImageId);
+        const assignedTo = wanted.get(row.xrayImageId);
+        if (!fresh.has(id) || !assignedTo || !findAssignableEmployee(assignedTo, roster)) return [];
+        return [buildAssignEvent({ xrayImageId: id, assignedTo, eventBy: actor, eventAt })];
+      });
+      if (events.length > 0) {
+        const written = await appendDistributionEvents(directoryHandle, month, events);
+        if (!written.ok) throw new Error("تعذّر تسجيل توزيع الحالات في الشهر.");
+      }
       await refreshDistributionCacheAfterWrite(directoryHandle, month, liveSampleRows(appended.data));
 
-      // 2. Out of the ad-hoc store — archived first, never deleted.
+      // 3. Out of the ad-hoc store: archived first, never deleted.
       const movedIds = new Set(movable.map((row) => row.xrayImageId));
       const storeDir = await getSampleMainDir(directoryHandle, store, true);
       await safeWriteJson(storeDir, `sample.master.before-move-${now.getTime()}.json`, storeSample);
@@ -126,31 +157,25 @@ export async function moveExceptionalCasesToIndex(
           const current = await loadSampleMaster(directoryHandle, store);
           if (!current) return { done: true, result: { ok: true as const, rows: [] } };
           const nextRevision = (current.revision ?? 0) + 1;
-          const keep = current.rows.filter((row) => !movedIds.has(row.xrayImageId));
-          const write = await saveSampleMaster(directoryHandle, store, {
-            ...current, rows: keep, totalActual: keep.length, revision: nextRevision, _writeToken: writeToken,
-          });
+          const next = withLiveTotals({ ...current, rows: current.rows.filter((row) => !movedIds.has(row.xrayImageId)) });
+          const write = await saveSampleMaster(directoryHandle, store, { ...next, revision: nextRevision, _writeToken: writeToken });
           if (!write.ok) return { done: false };
           const verify = await loadSampleMaster(directoryHandle, store);
           return verify?.revision === nextRevision && verify._writeToken === writeToken
-            ? { done: true, result: { ok: true as const, rows: verify.rows } }
+            ? { done: true, result: { ok: true as const, rows: liveSampleRows(verify) } }
             : { done: false };
         },
         { context: "month:move-exceptional-to-index", conflictError: "تعارض في الكتابة أثناء تحديث الحالات الاستثنائية." }
       );
       if (!rewritten.ok) throw new Error(rewritten.error);
-      const movedKeys = new Set(movable.map((row) => row.adhocSourceRowKey));
-      await saveAdhocRecord(directoryHandle, {
-        ...record,
-        rows: record.rows.map((row) => (movedKeys.has(row.rowKey) ? { ...row, excludedByAdmin: true, assignments: [] } : row)),
-      });
       await refreshDistributionCacheAfterWrite(directoryHandle, store, rewritten.rows);
       bumpWorkspaceEpoch(directoryHandle, store);
       moved += movable.length;
     }
     bumpWorkspaceEpoch(directoryHandle, month);
-    return { ok: true, moved, skippedStudied, unrestored: 0 };
+    return { ok: true, moved, skippedStudied, unrestored: 0, skipped };
   } catch (error) {
-    return { ok: false, reason: "write-failed", error: errorText(error) };
+    // Earlier imports may already have moved: say so, so the admin is not told nothing happened.
+    return { ok: false, reason: "write-failed", error: errorText(error), moved };
   }
 }

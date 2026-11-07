@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v159.16",
+    "date": "2026-11-07",
+    "bucket": "fix",
+    "scope": "months",
+    "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
+  },
+  {
     "version": "v159.15",
     "date": "2026-11-07",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "referrals",
     "title": "admin bulk move of the shown unstudied cases between index and exceptional"
-  },
-  {
-    "version": "v159.7",
-    "date": "2026-11-01",
-    "bucket": "fix",
-    "scope": "months",
-    "title": "restore split cases without a file; draw population-only cases into the sample; show original id for merged ad-hoc rows"
   }
 ];

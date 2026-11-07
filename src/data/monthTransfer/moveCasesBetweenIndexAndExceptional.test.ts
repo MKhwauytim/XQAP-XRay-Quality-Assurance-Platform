@@ -14,6 +14,8 @@ import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import { moveExceptionalCasesToIndex, moveIndexCasesToExceptional } from "./moveCasesBetweenIndexAndExceptional";
+import { executeSplitMonth, planSplitMonth } from "./splitMonthByIndexList";
+import { ensureAdhocSampleMaster } from "../adhocImport/adhocDistributionBridge";
 
 const JAN = "1-January-2026";
 const EMP = "jalgahamdi";
@@ -92,11 +94,62 @@ describe("bulk move between the index and the exceptional cases", () => {
     expect((await loadSampleMaster(root, JAN))!.rows.map((r) => r.xrayImageId).sort()).toEqual(["S1", "S2", "S3"]);
     expect((await assignees(root, JAN)).S3).toBe(EMP);
     expect((await loadSampleMaster(root, store))!.rows).toHaveLength(0);
-    expect((await loadAdhocRecord(root, importId))!.rows[0]).toMatchObject({ excludedByAdmin: true, assignments: [] });
+    expect((await loadAdhocRecord(root, importId))!.rows[0]).toMatchObject({ validation: { valid: false }, assignments: [] });
 
     // And out once more: an excluded row does not block a later move.
     const again = await moveIndexCasesToExceptional(root, JAN, ["S3"], "admin");
     expect(again).toMatchObject({ ok: true, moved: 1 });
     expect((await loadSampleMaster(root, JAN))!.rows.map((r) => r.xrayImageId)).toEqual(["S1", "S2"]);
+  });
+});
+
+describe("pre-merge review regressions (PR #231)", () => {
+  async function movedOut(root: DirectoryHandleLike) {
+    await seed(root);
+    await moveIndexCasesToExceptional(root, JAN, ["S3"], "admin");
+    const importId = (await loadAdhocImportIndex(root))![0].importId;
+    return { importId, store: adhocMonthFolder(importId), ns: namespacedXrayImageId(importId, "S3", 0) };
+  }
+
+  it("a moved-back row is never re-projected into the store, by a save or by a restore", async () => {
+    const root = createMemoryDirectory();
+    const { importId, store, ns } = await movedOut(root);
+    await moveExceptionalCasesToIndex(root, JAN, [{ importId, xrayImageId: ns, assignedTo: EMP }], "admin");
+    await ensureAdhocSampleMaster(root, (await loadAdhocRecord(root, importId))!);
+    expect((await loadSampleMaster(root, store))!.rows).toHaveLength(0);
+    await executeSplitMonth(root, JAN, null, "admin"); // restore-only
+    expect((await loadSampleMaster(root, store))!.rows).toHaveLength(0);
+  });
+
+  it("a fan-out copy is skipped, so one image gets one assignment in the month", async () => {
+    const root = createMemoryDirectory();
+    const { importId, store, ns } = await movedOut(root);
+    const storeSample = (await loadSampleMaster(root, store))!;
+    const replica = { ...storeSample.rows[0], xrayImageId: namespacedXrayImageId(importId, "S3", 1), adhocReplicaIndex: 1 };
+    expect((await saveSampleMaster(root, store, { ...storeSample, rows: [...storeSample.rows, replica] })).ok).toBe(true);
+    const result = await moveExceptionalCasesToIndex(root, JAN, [
+      { importId, xrayImageId: ns, assignedTo: EMP },
+      { importId, xrayImageId: replica.xrayImageId, assignedTo: "hihaloraini" },
+    ], "admin");
+    expect(result).toMatchObject({ ok: true, moved: 1, skipped: 1 });
+    expect((await loadSampleMaster(root, JAN))!.rows.filter((r) => r.xrayImageId === "S3")).toHaveLength(1);
+    expect((await assignees(root, JAN)).S3).toBe(EMP);
+  });
+
+  it("a split whose store write was lost repairs the store before removing rows from the month", async () => {
+    const root = createMemoryDirectory();
+    const { importId, store } = await movedOut(root);
+    const storeSample = (await loadSampleMaster(root, store))!;
+    expect((await saveSampleMaster(root, store, { ...storeSample, rows: [] })).ok).toBe(true);
+    await executeSplitMonth(root, JAN, null, "admin");
+    const stored = (await loadSampleMaster(root, store))!.rows.map((r) => r.xrayImageId);
+    expect(stored).toEqual([namespacedXrayImageId(importId, "S3", 0)]);
+  });
+
+  it("an empty id list is refused instead of moving every unstudied case", async () => {
+    const root = createMemoryDirectory();
+    await seed(root);
+    expect(await planSplitMonth(root, JAN, [])).toEqual({ ok: false, reason: "empty-list" });
+    expect(await planSplitMonth(root, JAN, ["  "])).toEqual({ ok: false, reason: "empty-list" });
   });
 });
