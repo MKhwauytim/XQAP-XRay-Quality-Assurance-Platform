@@ -7,7 +7,7 @@ import type { DistributionEntry } from "../distribution/distributionTypes";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import type { AdhocIndexEntry } from "./adhocImportModel";
-import { adhocMonthFolder, originalXrayImageId } from "./adhocImportModel";
+import { adhocMonthFolder, originalXrayImageId, originalXrayImageIdAnyImport } from "./adhocImportModel";
 import {
   adhocStoreHasDistributionEvents,
   listAdhocStoreImportIds,
@@ -44,13 +44,17 @@ export function isAdhocEntry(
  * This returns the operator's own id for an ad-hoc entry and the id itself for
  * every other entry, so one mixed queue renders consistently.
  *
+ * A row merged from an ad-hoc import INTO a real month (v158.1 merge) keeps its
+ * namespaced id but is no longer an ad-hoc entry, so it is unwrapped by pattern
+ * too (`originalXrayImageIdAnyImport`; a real id never matches it).
+ *
  * Display only. Selection, answer keys, folder routing and every write still go
  * through `entry.xrayImageId` — the namespaced id remains the identity.
  */
 export function displayXrayImageId(entry: DistributionEntry): string {
   return isAdhocEntry(entry)
     ? originalXrayImageId(entry.xrayImageId, entry.adhocImportId)
-    : entry.xrayImageId;
+    : originalXrayImageIdAnyImport(entry.xrayImageId);
 }
 
 /**

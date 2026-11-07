@@ -87,7 +87,7 @@ export function titleSlide(model: ReportModel): string {
     <h1>تقرير ضمان جودة فحص الأشعة</h1>
     <div class="title-sub">تقرير شهر: ${esc(model.summary.periodId)}</div>
     <div class="title-rule"></div>
-    <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
+    <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي - للاستخدام التنفيذي</div>`;
   return `<section class="slide title-slide" id="slide-title" data-title="الغلاف">
     <div class="slide-art" aria-hidden="true"></div>
     <div class="slide-inner">${body}</div>
@@ -120,7 +120,7 @@ export function agendaSlide(items: AgendaItem[], num: number, total: number): st
     headline: "ما الذي يغطيه هذا العرض",
     subhead: "أربعة محاور من مجتمع الصور إلى القرارات المطلوبة.",
     body,
-    decision: "خارطة القراءة — أين تجد كل قرار داخل العرض.",
+    decision: "خارطة القراءة - أين تجد كل قرار داخل العرض.",
   });
 }
 
@@ -130,7 +130,7 @@ export function execSummarySlide(model: ReportModel, num: number, total: number)
   const verdict =
     s.overallAccuracy === null
       ? "لا توجد قرارات قابلة للتقييم بعد لإصدار حُكم على الدقة هذه الفترة."
-      : `بلغت دقة فحص المستويين ${fmtPct(s.overallAccuracy)} مع اشتباه فائت ${fmtPct(s.missedSuspicionRate)} — العدسة الأمنية أولًا.`;
+      : `بلغت دقة فحص المستويين ${fmtPct(s.overallAccuracy)} مع اشتباه فائت ${fmtPct(s.missedSuspicionRate)} - العدسة الأمنية أولًا.`;
   const band = kpiBand([
     kpiTile({ label: "دقة الفحص", value: fmtPct(s.overallAccuracy), tone: "gold" }),
     kpiTile({ label: "اكتشاف الاشتباه", value: fmtPct(s.detectionRate), tone: "blue" }),
@@ -183,7 +183,7 @@ export function scopeSlide(model: ReportModel, num: number, total: number): stri
     total,
     eyebrow: "النطاق",
     iconName: "layers",
-    headline: "ما الذي فحصناه — وبأي تغطية",
+    headline: "ما الذي فحصناه - وبأي تغطية",
     subhead: "أساس موثوق: المجتمع كامل، والعينة مسحوبة منه بمنهجية معتمدة.",
     body: split(left, right),
     decision: "الثقة في أساس البيانات قبل قراءة بقية النتائج.",
@@ -230,7 +230,7 @@ export function verdictSlide(model: ReportModel, num: number, total: number): st
     total,
     eyebrow: "الحُكم · العدسة الأمنية",
     iconName: "gauge",
-    headline: `الاشتباه الفائت ${fmtPct(s.missedSuspicionRate)} — هل ما يفوتنا مقبول؟`,
+    headline: `الاشتباه الفائت ${fmtPct(s.missedSuspicionRate)} - هل ما يفوتنا مقبول؟`,
     subhead: `دقة الفحص ${fmtPct(s.overallAccuracy)} · اكتشاف الاشتباه ${fmtPct(s.detectionRate)}`,
     body: split(left, quad, "even"),
     decision: "هل جودة قرارات المستويين مقبولة أمنيًا أم تتطلب تدخلًا؟",
@@ -352,7 +352,7 @@ export function corroborationSlide(model: ReportModel, num: number, total: numbe
     eyebrow: "التطابق",
     iconName: "users",
     headline: `أعلى تطابق مع المراجع: ${SOURCE_LABEL[top.source]} (${fmtPct(top.agreementRate)})`,
-    subhead: "الفرق الأخرى دليل مساند — المراجع وحده هو المعيار الذهبي.",
+    subhead: "الفرق الأخرى دليل مساند - المراجع وحده هو المعيار الذهبي.",
     body: split(heroChart(rankedBar(bars, { width: 400 }), { caption: "تطابق كل فريق مع المراجع" }), right, "wide-left"),
     decision: "مستوى الثقة في حُكم الدقة بناءً على تأكيد الفرق المستقلة.",
   });
@@ -481,7 +481,7 @@ export function supportSlide(model: ReportModel, num: number, total: number): st
     return {
       iconName: "alert",
       title: `المفتش ${r.inspectorId}`,
-      text: `اشتباه فائت ${fmtPct(missedRate)} على ${fmtNum(r.evaluable)} قرار قابل للتقييم — الدليل: ${fmtNum(r.missedSuspicion)} صورة اشتباه فائتة.`,
+      text: `اشتباه فائت ${fmtPct(missedRate)} على ${fmtNum(r.evaluable)} قرار قابل للتقييم - الدليل: ${fmtNum(r.missedSuspicion)} صورة اشتباه فائتة.`,
       tone: "coral" as const,
     };
   });
@@ -515,7 +515,7 @@ export function riskSlide(model: ReportModel, num: number, total: number): strin
       headline: "أين يتركّز الخطر الأكبر؟",
       body: emptyHero(
         "لا يوجد اشتباه فائت مسجّل هذه الفترة",
-        "لم تُرصد صور اشتباه فائت ضمن القرارات القابلة للتقييم — لا يوجد تركّز خطر يُبرز هذه الفترة.",
+        "لم تُرصد صور اشتباه فائت ضمن القرارات القابلة للتقييم - لا يوجد تركّز خطر يُبرز هذه الفترة.",
       ),
       decision: "لا يلزم تحديد مالك خطر هذه الفترة؛ الاستمرار في الرصد.",
     });
@@ -674,7 +674,7 @@ export function buildDeckSlides(model: ReportModel): string {
     return {
       title: s.title,
       blurb: s.blurb,
-      range: end > start ? `${padNum(start)}–${padNum(end)}` : padNum(start),
+      range: end > start ? `${padNum(start)}-${padNum(end)}` : padNum(start),
     };
   });
 

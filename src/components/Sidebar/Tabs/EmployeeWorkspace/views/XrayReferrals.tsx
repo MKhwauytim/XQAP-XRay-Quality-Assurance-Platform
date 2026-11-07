@@ -46,6 +46,7 @@ import {
 } from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
+import { assignUndistributedCases } from "../../../../../data/referral/assignUndistributed";
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction, recordAction } from "../../../../../data/audit/actionLog";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -129,6 +130,8 @@ import {
 } from "./XrayReferrals/columnPreset";
 import { computePersonalStats } from "./XrayReferrals/personalStats";
 import { useCaseFilter } from "./XrayReferrals/caseFilter";
+import { MoveCasesButton } from "./XrayReferrals/MoveCasesButton";
+import { isUndistributedEntry, undistributedEntries } from "./XrayReferrals/undistributedEntries";
 import { buildAnswerStatusFilter } from "./XrayReferrals/answerStatusFilter";
 import { createQueueSelection } from "./XrayReferrals/queueSelection";
 import { useLocalSubmissionGuard } from "./XrayReferrals/localSubmissions";
@@ -1026,7 +1029,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // they narrow `scopedEntries`, and their counts are taken over the same set,
   // so the numbers always add up to the queue the reader is looking at. All of
   // it lives in ./XrayReferrals/caseFilter.ts (predicate, counts, state hook).
-  const caseFilter = useCaseFilter(scopedEntries);
+  // «تم فحصها / لم تُفحص»: completed, or the assignee submitted an answer.
+  const isStudied = useMemo(() => {
+    const submitted = new Set<string>();
+    for (const answer of answers) {
+      if (answer.status === "submitted") submitted.add(`${answer.xrayImageId}::${answer.answeredBy}`);
+    }
+    return (entry: DistributionEntry) =>
+      entry.status === "completed" || submitted.has(`${entry.xrayImageId}::${entry.assignedTo}`);
+  }, [answers]);
+  const caseFilter = useCaseFilter(scopedEntries, isStudied);
   const displayEntries = caseFilter.entries;
 
   const selEntry = useMemo(
@@ -1353,8 +1365,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // distinct color instead (see rowStatusClass below, wired into
         // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
         // remains a real filter.
+        // Oversight also sees the month's undistributed sample rows («غير موزعة»).
+        const shown = canSeeAll ? [...all, ...undistributedEntries(sample, all)] : all;
         setAllEntries(all);
-        setEntries(canSeeAll ? all : all.filter((e) => e.assignedTo === username));
+        setEntries(canSeeAll ? shown : all.filter((e) => e.assignedTo === username));
         setPendingReferralIds(pendingReferralIds);
         setPendingReplacementIds(pendingReplacementIds);
         setSampleMaster(sample);
@@ -1612,8 +1626,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // per store rather than refusing the mixed case: a request is per-folder
       // by construction. The old per-row referral path rejected such a
       // selection outright, which is a worse answer than splitting it.
+      // «غير موزعة» rows have no owner to ask: an admin assigns them directly
+      // (a first assignment, as the distribution screen does), audited below.
+      // Anyone else cannot route them at all, so they are skipped, not sent.
+      const undistributedIds = new Set(entries.filter(isUndistributedEntry).map((e) => e.xrayImageId));
+      const toAssign = role === "admin" ? reassignModal.xrayImageIds.filter((id) => undistributedIds.has(id)) : [];
+      let assignedTotal = 0;
+      if (toAssign.length > 0) {
+        const assigned = await assignUndistributedCases(directoryHandle, selMonth, toAssign, toEmployee, username);
+        if (!assigned.ok) {
+          setReassignError(assigned.error);
+          return;
+        }
+        assignedTotal = assigned.assigned;
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "distribution-bulk-assigned",
+          monthFolderName: selMonth,
+          target: toEmployee,
+          details: { samples: assignedTotal, source: "queue-bulk-assign-undistributed" },
+        });
+      }
       const byFolder = new Map<string, string[]>();
       for (const id of reassignModal.xrayImageIds) {
+        if (undistributedIds.has(id)) continue;
         const folder = folderForRow(id);
         const bucket = byFolder.get(folder);
         if (bucket) bucket.push(id);
@@ -1645,6 +1682,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
 
       const requestedTotal = createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
+      if (requestedTotal === 0 && assignedTotal > 0) {
+        setReassignModal(null);
+        clearSelection();
+        setStatusMsg({ type: "ok", text: getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) });
+        await loadData({ silent: true });
+        return;
+      }
       if (requestedTotal === 0) {
         setReassignError("لا توجد عينات مؤهلة للإحالة ضمن هذا التحديد.");
         return;
@@ -1667,11 +1711,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const requestCountText = createdRequests.length > 1
         ? ` (${createdRequests.length} طلبات — طلب لكل موظف مصدر)`
         : "";
+      const assignedPrefix = assignedTotal > 0
+        ? getLabels().ew_assign_undistributed_done.replace("{n}", String(assignedTotal)).replace("{name}", toEmployee) + " "
+        : "";
       setStatusMsg({
         type: "ok",
-        text: skippedTotal > 0
+        text: assignedPrefix + (skippedTotal > 0
           ? `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف. تم تخطي ${skippedTotal} عينة.`
-          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`,
+          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`),
       });
       // Silent — follows an already-successful write, not a month/user change;
       // must refresh the queue in place rather than flashing the loading state.
@@ -1886,13 +1933,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               // stays oversight-only, as before.
               toolbarStart={<CaseFilterBar state={caseFilter} />}
               toolbarEndExtra={
-                <XrQueueToolbarExtras
-                  canSeeAll={canSeeAll}
-                  scopeEmployee={scopeEmployee}
-                  scopeOptions={scopeOptions}
-                  totalCount={entries.length}
-                  onChangeScope={setScopeEmployee}
-                />
+                <>
+                  <XrQueueToolbarExtras
+                    canSeeAll={canSeeAll}
+                    scopeEmployee={scopeEmployee}
+                    scopeOptions={scopeOptions}
+                    totalCount={entries.length}
+                    onChangeScope={setScopeEmployee}
+                  />
+                  <MoveCasesButton
+                    directoryHandle={directoryHandle}
+                    month={selMonth}
+                    caseFilter={caseFilter.value}
+                    entries={filteredTableEntries}
+                    isStudied={isStudied}
+                    username={username}
+                    role={role}
+                    onDone={() => { void loadData(); }}
+                  />
+                </>
               }
             />
             {/* Second grid column: the sticky panel and the empty-state placeholder both live in this one placed track. */}

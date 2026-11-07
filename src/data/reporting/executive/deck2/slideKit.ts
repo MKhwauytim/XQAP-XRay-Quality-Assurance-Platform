@@ -45,7 +45,7 @@ export function barCell(inner: string, pct: number, tone: CellTone = "neutral"):
  * "—" like `pctCell`, with no bar.
  */
 export function threshCell(v: number | null, target: number): string {
-  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
   const val = Math.max(0, Math.min(100, v));
   const below = val < target;
   const tone = below ? "warn" : "ok";
@@ -70,7 +70,7 @@ export const MARKING_TARGET = 90;
  *  fixed polarity (green = good share, coral = risk share), NOT threshold-scored.
  *  Null renders the muted "—". */
 export function qualCell(v: number | null, tone: CellTone): string {
-  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
   return barCell(fmtPct(v), Math.max(0, Math.min(100, v)), tone);
 }
 
@@ -187,9 +187,9 @@ export const NAV_SECTIONS = {
   toc: "المحتويات",
   summary: "مؤشرات الشهر",
   glossary: "المعجم",
-  section1: "القسم 1 — مجتمع الفحص",
-  section2: "القسم 2 — نتائج فحص الجودة",
-  section3: "القسم 3 — التحاليل المتقدمة",
+  section1: "القسم 1 - مجتمع الفحص",
+  section2: "القسم 2 - نتائج فحص الجودة",
+  section3: "القسم 3 - التحاليل المتقدمة",
   /** R4 deck parity (2026-08-08) — coverage + accountability, see
    *  `deck2/section4/index.ts`. Deliberately NOT added to `sideRail`'s tabs
    *  list below: that list is rendered on EVERY content slide via `v2Slide`,
@@ -199,7 +199,7 @@ export const NAV_SECTIONS = {
    *  that list either (none of those four sections is in the rail). Section
    *  4's slides still render the rail (via `data-section="section4"`) —
    *  it just shows no currently-active tab, exactly like those four sections. */
-  section4: "القسم 4 — التغطية والمساءلة التشغيلية",
+  section4: "القسم 4 - التغطية والمساءلة التشغيلية",
   closing: "مصدر البيانات",
 } as const;
 export type NavSectionKey = keyof typeof NAV_SECTIONS;
@@ -252,7 +252,7 @@ export function navSectionLabel(key: NavSectionKey): string {
   if (activeOmittedSections.size === 0) return NAV_SECTIONS[key];
   const entry = CONTENT_SECTIONS.find(([k]) => k === key);
   const n = sectionNumber(key);
-  return entry && n !== null ? `القسم ${n} — ${entry[1]}` : NAV_SECTIONS[key];
+  return entry && n !== null ? `القسم ${n} - ${entry[1]}` : NAV_SECTIONS[key];
 }
 
 /**
@@ -767,7 +767,7 @@ export function rateOf(num: number, den: number): number | null {
 /** A percentage cell, muted (`.insuff`, matching the v1 deck's own port
  *  tables) when there's nothing to show rather than plain white "—" text. */
 export function pctCell(v: number | null): string {
-  return v === null ? `<span class="insuff">—</span>` : fmtPct(v);
+  return v === null ? `<span class="insuff">-</span>` : fmtPct(v);
 }
 
 /**
@@ -851,7 +851,7 @@ export function ledgerPortCard(opts: {
   const bodyRowsHtml =
     opts.bodyRowsHtml !== ""
       ? opts.bodyRowsHtml
-      : `<tr><td colspan="${opts.span}"><span class="insuff">${esc(opts.emptyText ?? "—")}</span></td></tr>`;
+      : `<tr><td colspan="${opts.span}"><span class="insuff">${esc(opts.emptyText ?? "-")}</span></td></tr>`;
   return ledgerTableCard({
     title: opts.title,
     theadCells: opts.theadCells,

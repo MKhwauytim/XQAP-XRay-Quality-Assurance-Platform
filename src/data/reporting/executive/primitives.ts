@@ -23,7 +23,7 @@ export function fmtNum(n: number): string {
 }
 
 export function fmtPct(n: number | null, digits = 1): string {
-  if (n === null) return "—";
+  if (n === null) return "-";
   return n.toFixed(digits) + "%";
 }
 
@@ -40,7 +40,7 @@ type TableOpts = { headers: string[]; rows: (string | number | null)[][]; totalR
 export function dataTable({ headers, rows, totalRow }: TableOpts): string {
   const th = headers.map(h => `<th>${esc(String(h))}</th>`).join("");
   const trs = rows.map(r =>
-    `<tr>${r.map(c => `<td>${c === null ? '<span class="insuff">—</span>' : esc(String(c))}</td>`).join("")}</tr>`
+    `<tr>${r.map(c => `<td>${c === null ? '<span class="insuff">-</span>' : esc(String(c))}</td>`).join("")}</tr>`
   ).join("");
   const tot = totalRow
     ? `<tr class="total-row">${totalRow.map(c => `<td>${c === null ? "" : esc(String(c))}</td>`).join("")}</tr>`

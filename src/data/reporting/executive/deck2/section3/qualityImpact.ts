@@ -528,11 +528,11 @@ function briefingQualityLedeAndRank(
   const high = strata.find((s) => s.level === "عالي");
   const low = strata.find((s) => s.level === "منخفض");
   const figure =
-    gradient === null ? `<span class="insuff">—</span>` : `<span dir="ltr">${signedPoints(gradient)}</span>`;
+    gradient === null ? `<span class="insuff">-</span>` : `<span dir="ltr">${signedPoints(gradient)}</span>`;
   const label =
     gradient === null || !high || !low
-      ? `تدرّج الدقة — ${esc(GRADIENT_INSUFFICIENT_NOTE)}`
-      : `تدرّج الدقة <span dir="ltr">${signedPoints(gradient)}</span> نقطة — عالي ${pctCell(high.accuracy)} مقابل منخفض ${pctCell(low.accuracy)}`;
+      ? `تدرّج الدقة - ${esc(GRADIENT_INSUFFICIENT_NOTE)}`
+      : `تدرّج الدقة <span dir="ltr">${signedPoints(gradient)}</span> نقطة - عالي ${pctCell(high.accuracy)} مقابل منخفض ${pctCell(low.accuracy)}`;
 
   const rankItems: BriefingRankItem[] = strata.map((s) => ({
     label: s.level,
@@ -554,7 +554,7 @@ function briefingQualityLedeAndRank(
     foldRemainder: (folded) => ({
       label: `بقية المستويات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
@@ -702,7 +702,7 @@ export function qualityImpactSlide(
   return v2Slide({
     id: "slide-s3-quality",
     title: "أثر جودة الصورة على الدقة",
-    eyebrow: "القسم 3 — التحاليل المتقدمة",
+    eyebrow: "القسم 3 - التحاليل المتقدمة",
     iconName: "gauge",
     headline: "أثر جودة الصورة على الدقة",
     subhead: "دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.",
@@ -723,7 +723,7 @@ export function qualityImpactSlide(
  * 2×2 default regardless of where this block is concatenated.
  */
 export const QUALITY_IMPACT_CSS = `
-/* ── Section 3 — أثر جودة الصورة على الدقة (slide-s3-quality) ─────────────── */
+/* ── Section 3 - أثر جودة الصورة على الدقة (slide-s3-quality) ─────────────── */
 .v2-qi .insuff{color:var(--slate);font-weight:800;}
 .v2-risk-tile-grid.v2-qi-tiles{grid-template-columns:repeat(3,1fr);grid-template-rows:1fr;}
 .v2-qi-flag{display:inline-flex;vertical-align:middle;margin-inline-end:4px;color:var(--gold);}
@@ -790,10 +790,10 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
   .v2-qi-mid{flex-direction:column;}
 }
 
-/* ── Ledger — two stacked tables (fan-out plan §11f, batch B3 item 4) ────── */
+/* ── Ledger - two stacked tables (fan-out plan §11f, batch B3 item 4) ────── */
 /* display:flex column (not the plain height:100% block box this shipped
    with) so the caveat sibling below .v2-lg-split is actually accounted for
-   in this wrapper's own layout — a block box sized to height:100% does NOT
+   in this wrapper's own layout - a block box sized to height:100% does NOT
    shrink its block-flow children to fit; the caveat simply rendered past
    the wrapper's (and so the slide's) bottom edge, clipped invisibly by the
    slide's own overflow:hidden. Same fix .v2-lg-workload already uses. */
@@ -804,13 +804,13 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
    height fairly instead of one collapsing to its intrinsic (shorter) size. */
 .v2-qi-lg-strata,.v2-qi-lg-reasons{margin-top:0;}
 
-/* ── Briefing/Grid namespacing hooks — nothing bespoke beyond the shared
+/* ── Briefing/Grid namespacing hooks - nothing bespoke beyond the shared
    components, same "hook only" role every other fanned-out page's page-local
    class plays. ────────────────────────────────────────────────────────── */
 .v2-bf-quality{height:100%;}
 /* 2026-07-28 whole-branch-review fix (C5): .v2-gd-quality used to be bare
    height:100% with TWO block children (.v2-gd-split, which itself claims
-   height:100%, then the mandatory caveat strip stacked below it) — with no
+   height:100%, then the mandatory caveat strip stacked below it) - with no
    flex context, the split alone filled the wrapper's full height and the
    caveat had nowhere left to go, overflowing both the 14px body padding and
    the slide's own overflow:hidden box (measured: 3px clipped). Fixed with
@@ -821,7 +821,7 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
 .v2-gd-quality{display:flex;flex-direction:column;gap:12px;height:100%;min-height:0;}
 .v2-gd-quality .v2-gd-split{flex:1 1 auto;min-height:0;}
 /* The reasons card (.v2-qi-reasons, unchanged) sits beside the new matrix
-   panel inside the shared .v2-gd-split grid — give it the same full-row
+   panel inside the shared .v2-gd-split grid - give it the same full-row
    stretch .v2-gd-panel gets by default so the two don't visually mismatch
    in height. */
 .v2-gd-quality .v2-qi-reasons{height:100%;}

@@ -20,7 +20,7 @@ import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { computePopulationReportModel } from "./model";
 import type { PopulationReportModel, PopulationReportInput } from "./model";
 import { RESULT_HEADERS, resultRow, contentsRows } from "./deck";
-import { STAGE_LABELS } from "./fold";
+import { otherSuffix, STAGE_LABELS } from "./fold";
 import type { PortBreakdown, PopulationReportScope } from "./types";
 import { sourceRevisionsFooterHtml, SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 import { ZATCA_LOGO_URL } from "../../../branding/organization";
@@ -53,7 +53,7 @@ ${docTwoColumn({
 
 function buildContentsPage(scope: PopulationReportScope): string {
   const rows = contentsRows(scope);
-  const items = rows.map((r) => `<li><strong>${esc(r.title)}</strong> — ${esc(r.description)}</li>`).join("");
+  const items = rows.map((r) => `<li><strong>${esc(r.title)}</strong> - ${esc(r.description)}</li>`).join("");
   return docPage({
     id: "contents",
     pageNo: "00",
@@ -84,7 +84,7 @@ ${docTwoColumn({
     title: "بيانات معلومات الأعمال (BI)",
     body: docKpiStrip(
       model.reconciled.biRawRowCount === null
-        ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "—" }]
+        ? [{ label: "لم يتم توفير BI لهذا الشهر", value: "-" }]
         : [{ label: "إجمالي الصفوف الخام", value: fmtNum(model.reconciled.biRawRowCount) }]
     ),
   },
@@ -97,8 +97,8 @@ ${docTwoColumn({
     docPage({
       id: "s1-risk",
       pageNo: pad(n++),
-      title: "بيانات المخاطر — قبل وبعد",
-      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات المخاطر — قبل وبعد" })}
+      title: "بيانات المخاطر - قبل وبعد",
+      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات المخاطر - قبل وبعد" })}
 ${
   summary
     ? docKpiStrip([
@@ -127,8 +127,8 @@ ${
     docPage({
       id: "s1-bi",
       pageNo: pad(n++),
-      title: "بيانات BI — قبل وبعد",
-      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات BI — قبل وبعد" })}
+      title: "بيانات BI - قبل وبعد",
+      body: `${docPageHeader({ eyebrow: "القسم الأول", title: "بيانات BI - قبل وبعد" })}
 ${
   summary && summary.biProvided
     ? `${docKpiStrip([
@@ -195,8 +195,8 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
   const stageRows = model.distribution.byEmployeeStage.map((emp) => [
     { html: esc(emp.displayName) },
     ...model.distribution.stageKeysPresent.map((k) => {
-      const c = emp.stages[k] ?? { سليمة: 0, اشتباه: 0, total: 0 };
-      return { html: `${fmtNum(c.total)} (${fmtNum(c.سليمة)}/${fmtNum(c.اشتباه)})` };
+      const c = emp.stages[k] ?? { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
+      return { html: `${fmtNum(c.total)} (${fmtNum(c.سليمة)}/${fmtNum(c.اشتباه)})${esc(otherSuffix(c))}` };
     }),
     { html: fmtNum(emp.total.total) },
   ]);
@@ -207,8 +207,8 @@ async function buildSection3Pages(model: PopulationReportModel): Promise<string[
 
   const portRows = model.distribution.byEmployeePort.map((emp) => [
     { html: esc(emp.displayName) },
-    { html: `${fmtNum(emp.ports.land.total)} (${fmtNum(emp.ports.land.سليمة)}/${fmtNum(emp.ports.land.اشتباه)})` },
-    { html: `${fmtNum(emp.ports.sea.total)} (${fmtNum(emp.ports.sea.سليمة)}/${fmtNum(emp.ports.sea.اشتباه)})` },
+    { html: `${fmtNum(emp.ports.land.total)} (${fmtNum(emp.ports.land.سليمة)}/${fmtNum(emp.ports.land.اشتباه)})${esc(otherSuffix(emp.ports.land))}` },
+    { html: `${fmtNum(emp.ports.sea.total)} (${fmtNum(emp.ports.sea.سليمة)}/${fmtNum(emp.ports.sea.اشتباه)})${esc(otherSuffix(emp.ports.sea))}` },
     { html: fmtNum(emp.total.total) },
   ]);
   for (const chunk of docPaginateTable({ headers: ["الموظف", "برية", "بحرية", "الإجمالي"], rows: portRows, rowsPerPage: 25 })) {
@@ -245,11 +245,11 @@ export async function buildPopulationDocument(
     pages.push(...(await buildSection2Pages(model)));
     pages.push(...(await buildSection3Pages(model)));
   }
-  pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع — ${model.monthLabel}` }));
+  pages.push(docClosing({ org, title: "نهاية التقرير", closingLine: `تقرير المجتمع - ${model.monthLabel}` }));
   const footer = sourceRevisionsFooterHtml(model.sourceRevisions, esc);
 
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
-<title>تقرير المجتمع — ${esc(model.monthLabel)}</title>
+<title>تقرير المجتمع - ${esc(model.monthLabel)}</title>
 <style>${DOCUMENT_V3_CSS}${footer ? SOURCE_REVISIONS_CSS : ""}</style></head>
 <body><div class="docviewer"><aside class="sidebar no-print"><div class="doc-brand">تقرير المجتمع</div><div class="doc-brand-sub">${esc(model.monthLabel)}</div></aside>
 <main class="content">${pages.join("\n")}${footer}</main></div></body></html>`;

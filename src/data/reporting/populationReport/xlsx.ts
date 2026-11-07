@@ -5,23 +5,23 @@
 import * as XLSX from "xlsx";
 import { computePopulationReportModel } from "./model";
 import type { PopulationReportInput, PopulationReportModel } from "./model";
-import { STAGE_LABELS } from "./fold";
+import { otherColumn, STAGE_LABELS } from "./fold";
 import type { PopulationReportScope } from "./types";
 import { hasSourceRevisions, sourceRevisionsSheetAoa, SOURCE_REVISIONS_SHEET_NAME_AR } from "../sourceRevisions";
 
 function stageSheetRows(model: PopulationReportModel, source: "reconciled" | "sample") {
   const bucket = model[source];
   return [
-    ...bucket.byStage.map((b) => ({ المرحلة: b.stageLabel, الإجمالي: b.counts.total, سليمة: b.counts.سليمة, اشتباه: b.counts.اشتباه })),
-    { المرحلة: "الإجمالي", الإجمالي: bucket.totals.total, سليمة: bucket.totals.سليمة, اشتباه: bucket.totals.اشتباه },
+    ...bucket.byStage.map((b) => ({ المرحلة: b.stageLabel, الإجمالي: b.counts.total, سليمة: b.counts.سليمة, اشتباه: b.counts.اشتباه, ...otherColumn("", b.counts) })),
+    { المرحلة: "الإجمالي", الإجمالي: bucket.totals.total, سليمة: bucket.totals.سليمة, اشتباه: bucket.totals.اشتباه, ...otherColumn("", bucket.totals) },
   ];
 }
 
 function portSheetRows(model: PopulationReportModel, source: "reconciled" | "sample") {
   const { land, sea } = model[source].byPort;
   return [
-    ...land.map((p) => ({ المنفذ: p.portName, النوع: "بري", الإجمالي: p.counts.total, سليمة: p.counts.سليمة, اشتباه: p.counts.اشتباه })),
-    ...sea.map((p) => ({ المنفذ: p.portName, النوع: "بحري", الإجمالي: p.counts.total, سليمة: p.counts.سليمة, اشتباه: p.counts.اشتباه })),
+    ...land.map((p) => ({ المنفذ: p.portName, النوع: "بري", الإجمالي: p.counts.total, سليمة: p.counts.سليمة, اشتباه: p.counts.اشتباه, ...otherColumn("", p.counts) })),
+    ...sea.map((p) => ({ المنفذ: p.portName, النوع: "بحري", الإجمالي: p.counts.total, سليمة: p.counts.سليمة, اشتباه: p.counts.اشتباه, ...otherColumn("", p.counts) })),
   ];
 }
 
@@ -80,10 +80,11 @@ export async function buildPopulationXlsx(
     const employeeStageRows = model.distribution.byEmployeeStage.map((emp) => {
       const record: Record<string, string | number> = { الموظف: emp.displayName };
       for (const key of model.distribution.stageKeysPresent) {
-        const c = emp.stages[key] ?? { سليمة: 0, اشتباه: 0, total: 0 };
+        const c = emp.stages[key] ?? { سليمة: 0, اشتباه: 0, other: 0, total: 0 };
         record[`${STAGE_LABELS[key] ?? key} - الإجمالي`] = c.total;
         record[`${STAGE_LABELS[key] ?? key} - سليمة`] = c.سليمة;
         record[`${STAGE_LABELS[key] ?? key} - اشتباه`] = c.اشتباه;
+        Object.assign(record, otherColumn(`${STAGE_LABELS[key] ?? key} - `, c));
       }
       record["الإجمالي"] = emp.total.total;
       return record;
@@ -95,9 +96,11 @@ export async function buildPopulationXlsx(
       "برية - الإجمالي": emp.ports.land.total,
       "برية - سليمة": emp.ports.land.سليمة,
       "برية - اشتباه": emp.ports.land.اشتباه,
+      ...otherColumn("برية - ", emp.ports.land),
       "بحرية - الإجمالي": emp.ports.sea.total,
       "بحرية - سليمة": emp.ports.sea.سليمة,
       "بحرية - اشتباه": emp.ports.sea.اشتباه,
+      ...otherColumn("بحرية - ", emp.ports.sea),
       الإجمالي: emp.total.total,
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(employeePortRows), "التوزيع - الموظف والمنفذ");

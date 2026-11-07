@@ -1,0 +1,185 @@
+{
+ "T3": [
+  {
+   "slide": 2,
+   "title": "تفاصيل المنافذ",
+   "rows": 15,
+   "headerRepeated": true,
+   "bottomPt": 495,
+   "slideHpt": 540,
+   "insideSlide": true,
+   "multiLineCells": 0
+  },
+  {
+   "slide": 3,
+   "title": "تفاصيل المنافذ (يتبع)",
+   "rows": 15,
+   "headerRepeated": true,
+   "bottomPt": 495,
+   "slideHpt": 540,
+   "insideSlide": true,
+   "multiLineCells": 0
+  },
+  {
+   "slide": 4,
+   "title": "تفاصيل المنافذ (يتبع)",
+   "rows": 10,
+   "headerRepeated": true,
+   "bottomPt": 370,
+   "slideHpt": 540,
+   "insideSlide": true,
+   "multiLineCells": 0
+  }
+ ],
+ "T4": {
+  "total": 40,
+  "mismatches": []
+ },
+ "T3somar": [
+  [
+   15,
+   true,
+   true,
+   0
+  ],
+  [
+   15,
+   true,
+   true,
+   0
+  ],
+  [
+   10,
+   true,
+   true,
+   0
+  ]
+ ],
+ "T4somarMismatches": [],
+ "html": [
+  {
+   "id": "T1",
+   "cells": 15,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T3-1",
+   "cells": 80,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T3-2",
+   "cells": 80,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T3-3",
+   "cells": 55,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-1",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-2",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-3",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-4",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-5",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-6",
+   "cells": 72,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T4-7",
+   "cells": 48,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T5",
+   "cells": 0,
+   "clipped": 0,
+   "outside": 0
+  },
+  {
+   "id": "T6",
+   "cells": 0,
+   "clipped": 0,
+   "outside": 0
+  },
+  []
+ ],
+ "T5": {
+  "group": true,
+  "items": 9,
+  "shapes": 5,
+  "connectors": 4,
+  "connectorsGlued": 4,
+  "editedText": "تعديل",
+  "movedLeft": 200
+ },
+ "T6": {
+  "freeform": true,
+  "type": 5,
+  "nodes": 5,
+  "text": "شكل حر قابل للتعديل",
+  "editedText": "نص جديد",
+  "nodesAfterInsert": 6
+ },
+ "G2": {
+  "mediaFiles": 1,
+  "picElements": 0
+ },
+ "G10": {
+  "deckTextHits": 0,
+  "filesWithHits": [
+   "checkT.mjs",
+   "model.mjs",
+   "RESULTS.md",
+   "toHtml.mjs",
+   "toPptx.mjs"
+  ]
+ },
+ "T7": {
+  "tests-embed-eot": {
+   "open": true
+  },
+  "tests-embed-ttf": {
+   "open": true
+  },
+  "tests-embed-glyf-eot": {
+   "open": true
+  },
+  "tests-embed-glyf-ttf": {
+   "open": true
+  }
+ }
+}

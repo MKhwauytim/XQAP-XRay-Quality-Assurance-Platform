@@ -69,7 +69,7 @@ export async function buildEmployeeRowListingPages(model: ReportModel, startPage
     const displayName = names[reviewerId] ?? reviewerId;
     const sorted = [...records].sort((a, b) => (a.completedAt ?? a.assignedAt ?? "").localeCompare(b.completedAt ?? b.assignedAt ?? ""));
     const rows = sorted.map((r) => [
-      r.xrayImageId, r.portName ?? "—", r.stage ?? "—", levelLabel(r.decisionLevel), r.employeeDecision, r.completedAt ?? r.assignedAt ?? "—",
+      r.xrayImageId, r.portName ?? "-", r.stage ?? "-", levelLabel(r.decisionLevel), r.employeeDecision, r.completedAt ?? r.assignedAt ?? "-",
     ]);
     const chunks = paginateRows({
       headers: ["رقم الأشعة", "المنفذ", "المستوى", "مرحلة القرار", "الإجابة", "التاريخ"],
@@ -79,10 +79,10 @@ export async function buildEmployeeRowListingPages(model: ReportModel, startPage
     for (let i = 0; i < chunks.length; i++) {
       html.push(page({
         id: `page-emp-rows-${slug(reviewerId)}-${i}`,
-        title: i === 0 ? `صفوف الموظف — ${displayName}` : `صفوف الموظف — ${displayName} (${i + 1})`,
+        title: i === 0 ? `صفوف الموظف - ${displayName}` : `صفوف الموظف - ${displayName} (${i + 1})`,
         pageNo: pad(n++),
         railTabs: TABS,
-        body: `${pageHeader({ iconName: "user", eyebrow: "الجزء السادس · قوائم الصفوف", title: `صفوف الموظف — ${displayName}`, subtitle: `${fmtNum(records.length)} صف من إجمالي جدول الوقائع.` })}
+        body: `${pageHeader({ iconName: "user", eyebrow: "الجزء السادس · قوائم الصفوف", title: `صفوف الموظف - ${displayName}`, subtitle: `${fmtNum(records.length)} صف من إجمالي جدول الوقائع.` })}
           ${panel(displayName, chunks[i]!, { iconName: "user" })}`,
       }));
       await yieldToMain();

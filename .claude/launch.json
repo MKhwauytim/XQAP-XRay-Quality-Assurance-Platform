@@ -32,6 +32,21 @@
         "--strictPort"
       ],
       "port": 5179
+    },
+    {
+      "name": "catalog-lookbook",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--outDir",
+        "C:/Users/WorkNStudy/AppData/Local/Temp/claude/58184f5f35b1065a/ad7032fa-964b-477e-8c58-1a6a59db008a/scratchpad/catalog-demo",
+        "--port",
+        "5181",
+        "--strictPort"
+      ],
+      "port": 5181,
+      "url": "http://localhost:5181"
     }
   ]
 }

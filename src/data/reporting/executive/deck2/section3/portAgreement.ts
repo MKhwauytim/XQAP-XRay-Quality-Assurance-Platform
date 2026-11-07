@@ -63,14 +63,14 @@ const COL_SPAN = 6;
 const POP_COUNT_TONE: CellTone = "neutral";
 const SAMPLE_COUNT_TONE: CellTone = "blue";
 
-const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
 
 /** The scope caveat. Rendered on every page of this slide (continuations
  *  included) because a continuation page is read on its own just as often. */
 const SCOPE_NOTE =
   "اتفاق المستويين محسوب على مجتمع الشهر كاملًا في المنفذ (عمود المجتمع)، " +
   "أمّا مطابقة كل مستوى لنتيجة المراجع فتُحسب على العيّنة المدروسة فقط (عمود العيّنة) " +
-  "لأن المراجع لا يبدي نتيجته إلا على الصور المسحوبة في العيّنة — الأساسان مختلفان، " +
+  "لأن المراجع لا يبدي نتيجته إلا على الصور المسحوبة في العيّنة - الأساسان مختلفان، " +
   "ولا تصحّ المقارنة المباشرة بين النسبتين.";
 
 const UNNAMED_PORT = "غير محدد";
@@ -211,7 +211,7 @@ function agreementTable(
             );
           })
           .join("")
-      : `<tr><td colspan="${COL_SPAN}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${COL_SPAN}"><span class="insuff">-</span></td></tr>`;
 
   const sum = (f: (p: PortAgreementRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalL1L2 = sum((p) => p.l1l2Comparable);
@@ -343,7 +343,7 @@ function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgre
   const combinedAll = [...landChunk, ...seaChunk];
   if (combinedAll.length === 0) {
     return `<div class="v2-sys-brief v2-bf-agree">
-      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">-</span></div></div>
       ${scopeNote()}
     </div>`;
   }
@@ -399,7 +399,7 @@ function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgre
     rankItems.push({
       label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
     });
     rawForFold.push({
@@ -434,7 +434,7 @@ function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgre
     ${briefingLede({
       figure: pctCell(pooledAgreement),
       tone: "gold",
-      label: `اتفاق المستويين ${pctCell(pooledAgreement)} — ${fmtNum(totalL1L2Agree)} من ${fmtNum(totalL1L2)} صورة`,
+      label: `اتفاق المستويين ${pctCell(pooledAgreement)} - ${fmtNum(totalL1L2Agree)} من ${fmtNum(totalL1L2)} صورة`,
       basis,
     })}
     ${supportStrip}
@@ -532,7 +532,7 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
       return v2Slide({
         id: `slide-s3-port-agreement${suffix}`,
         title: `توافق المستويات حسب المنفذ${cont}`,
-        eyebrow: "القسم 3 — التحاليل المتقدمة",
+        eyebrow: "القسم 3 - التحاليل المتقدمة",
         iconName: "port",
         headline: `توافق المستويات حسب المنفذ${cont}`,
         subhead:
@@ -562,7 +562,7 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
  * budget stays valid.
  */
 export const PORT_AGREEMENT_CSS = `
-/* ── Section 3 — توافق المستويات حسب المنفذ ──────────────────────────────── */
+/* ── Section 3 - توافق المستويات حسب المنفذ ──────────────────────────────── */
 .v2-agree-wrap{display:flex;flex-direction:column;gap:7px;height:100%;min-height:0;}
 .v2-agree-wrap .v2-port-split,
 .v2-agree-wrap .v2-lg-split,
@@ -595,7 +595,7 @@ export const PORT_AGREEMENT_CSS = `
 .v2-lg-agree .v2-lg-port-card .deck-table td:first-child{overflow-wrap:anywhere;}
 .v2-lg-agree .v2-lg-port-card .v2-lg-idx{width:16px;height:16px;font-size:.56rem;margin-inline-end:5px;}
 .v2-lg-agree .v2-lg-port-card.compact .v2-lg-idx{width:14px;height:14px;font-size:.5rem;margin-inline-end:4px;}
-/* Briefing/Grid namespacing hooks — "nothing bespoke beyond the shared
+/* Briefing/Grid namespacing hooks - "nothing bespoke beyond the shared
    components" role, same as every other fanned-out page's page-local hook. */
 .v2-bf-agree,.v2-gd-agree{height:100%;}
 .v2-gd-agree .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}

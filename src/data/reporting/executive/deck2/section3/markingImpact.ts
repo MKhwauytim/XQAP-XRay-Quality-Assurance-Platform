@@ -250,7 +250,7 @@ function accuracyArc(pct: number): string {
 function markTile(s: MarkStratum): string {
   const figure =
     s.accuracy === null
-      ? `<b><span class="insuff">—</span></b><span>${esc(s.n === 0 ? "لا توجد صور مُقيَّمة" : INSUFFICIENT_NOTE)}</span>`
+      ? `<b><span class="insuff">-</span></b><span>${esc(s.n === 0 ? "لا توجد صور مُقيَّمة" : INSUFFICIENT_NOTE)}</span>`
       : `<b>${fmtPct(s.accuracy)}</b><span>دقة قرارات الفحص</span>`;
   const arc = s.accuracy === null ? "" : accuracyArc(s.accuracy);
   return `<div class="v2-risk-tile ${s.tone}">
@@ -288,7 +288,7 @@ function deltaChip(present: MarkStratum, absent: MarkStratum): string {
   if (!comparable(present, absent)) {
     return `<div class="v2-mark-delta insufficient">
       <span class="v2-mark-delta-label">الفارق</span>
-      <b class="v2-mark-delta-value"><span class="insuff">—</span></b>
+      <b class="v2-mark-delta-value"><span class="insuff">-</span></b>
       <span class="v2-mark-delta-note">${esc(INSUFFICIENT_NOTE)}</span>
     </div>`;
   }
@@ -409,13 +409,13 @@ function ledgerMarkTable(present: MarkStratum, absent: MarkStratum, recorded: nu
 
   const deltaFigure = comparable(present, absent)
     ? `<span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span>`
-    : `<span class="insuff">—</span>`;
+    : `<span class="insuff">-</span>`;
   const deltaRow =
-    `<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>—</td><td>${deltaFigure}</td>` +
-    `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
+    `<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>-</td><td>${deltaFigure}</td>` +
+    `<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>`;
 
   return ledgerPortCard({
-    title: `يوجد تحديد مقابل لا يوجد تحديد — ${fmtNum(recorded)} صورة لها سجل تحديد`,
+    title: `يوجد تحديد مقابل لا يوجد تحديد - ${fmtNum(recorded)} صورة لها سجل تحديد`,
     theadCells:
       `<th>الفئة</th><th>العيّنة</th><th>الدقة</th><th>كشف الاشتباه</th>` +
       `<th>سليمة صحيحة</th><th>اشتباه صحيح</th><th>اشتباه فائت</th><th>اشتباه خاطئ</th>`,
@@ -459,7 +459,7 @@ function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum, supp
   const isComparable = comparable(present, absent);
   const figure = isComparable
     ? `<span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span>`
-    : `<span class="insuff">—</span>`;
+    : `<span class="insuff">-</span>`;
   // The signed figure embedded in this Arabic sentence needs its OWN
   // dir="ltr" isolation, same as the standalone `figure` above — measured
   // 2026-07-28 (C4): a signed value sitting bare inside RTL prose renders
@@ -468,8 +468,8 @@ function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum, supp
   // even though the exact same value correctly reads left-to-right when
   // wrapped, as `figure` already is.
   const label = isComparable
-    ? `فارق الدقة <span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span> نقطة — بتحديد ${pctCell(present.accuracy)} مقابل بلا تحديد ${pctCell(absent.accuracy)}`
-    : `فارق الدقة — ${esc(INSUFFICIENT_NOTE)}`;
+    ? `فارق الدقة <span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span> نقطة - بتحديد ${pctCell(present.accuracy)} مقابل بلا تحديد ${pctCell(absent.accuracy)}`
+    : `فارق الدقة - ${esc(INSUFFICIENT_NOTE)}`;
 
   const rankItems: BriefingRankItem[] = [present, absent].map((s) => ({
     label: s.label,
@@ -489,7 +489,7 @@ function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum, supp
     foldRemainder: (folded) => ({
       label: `بقية الفئات (${fmtNum(folded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
       rest: true,
     }),
@@ -651,7 +651,7 @@ export function markingImpactSlide(
   return v2Slide({
     id: "slide-s3-marking",
     title: "أثر وجود التحديد على الدقة",
-    eyebrow: "القسم 3 — التحاليل المتقدمة",
+    eyebrow: "القسم 3 - التحاليل المتقدمة",
     iconName: "flag",
     headline: "أثر وجود التحديد على الدقة",
     subhead: "مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.",
@@ -726,9 +726,9 @@ export const MARKING_IMPACT_CSS = `
 .v2-mark-caveat-icon{display:inline-flex;flex-shrink:0;color:var(--gold);}
 .v2-mark-caveat-icon svg{display:block;}
 
-/* Single empty state — no marking record on any evaluated image. Shared
+/* Single empty state - no marking record on any evaluated image. Shared
    across all 4 slots, so it must behave inside all 4 wrapper flex contexts
-   (.v2-risk-layout / .v2-lg-marking / .v2-sys-brief / .v2-gd-marking) —
+   (.v2-risk-layout / .v2-lg-marking / .v2-sys-brief / .v2-gd-marking) -
    flex:1/min-height:0 lets it fill whatever space its container gives it. */
 .v2-mark-empty{
   display:flex;flex:1;min-height:0;flex-direction:column;align-items:center;justify-content:center;
@@ -752,10 +752,10 @@ body.theme-light .v2-mark-bar-empty{background:rgba(10,45,74,.03);}
   .v2-mark-compare,.v2-mark-delta,.v2-mark-empty,.v2-mark-prop{break-inside:avoid;}
 }
 
-/* ── Ledger — يوجد/لا يوجد تحديد table (fan-out plan §11e, batch B3 item 3) ─ */
+/* ── Ledger - يوجد/لا يوجد تحديد table (fan-out plan §11e, batch B3 item 3) ─ */
 .v2-lg-marking{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}
 .v2-lg-marking .v2-lg-port-card{flex:1 1 auto;min-height:0;}
-/* 8 columns is more than any other Ledger port card in this deck carries —
+/* 8 columns is more than any other Ledger port card in this deck carries -
    mirrors .v2-lg-agree's 6-column squeeze one step further. Scoped to
    .mark-8col so it never bleeds onto any other .v2-lg-port-card. */
 .v2-lg-port-card.mark-8col .deck-table th{
@@ -764,7 +764,7 @@ body.theme-light .v2-mark-bar-empty{background:rgba(10,45,74,.03);}
 .v2-lg-port-card.mark-8col .deck-table td{font-size:.68rem;padding:9px 4px;}
 .v2-lg-port-card.mark-8col .deck-table th:first-child,
 .v2-lg-port-card.mark-8col .deck-table td:first-child{text-align:right;overflow-wrap:anywhere;}
-/* The tfoot's SECOND row — الفارق — reads as a distinct derived figure, not a
+/* The tfoot's SECOND row - الفارق - reads as a distinct derived figure, not a
    second totals row: a dashed gold top border instead of the base tfoot
    rule's solid one, gold ink on the delta cell only. */
 .v2-lg-port-card.mark-8col .deck-table tfoot tr.v2-lg-delta-row td{
@@ -777,7 +777,7 @@ body.theme-light .v2-lg-port-card.mark-8col .deck-table tfoot tr.v2-lg-delta-row
 }
 body.theme-light .v2-lg-port-card.mark-8col .deck-table tfoot tr.v2-lg-delta-row td:first-child{color:color-mix(in srgb, var(--navy) 74%, transparent);}
 
-/* ── Briefing/Grid namespacing hooks — "nothing bespoke beyond the shared
+/* ── Briefing/Grid namespacing hooks - "nothing bespoke beyond the shared
    components" role, same as every other fanned-out page's page-local hook. */
 .v2-bf-marking{height:100%;}
 .v2-gd-marking{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}

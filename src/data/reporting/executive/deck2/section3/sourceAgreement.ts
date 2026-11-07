@@ -72,7 +72,7 @@ import type { BriefingRankItem, CellTone } from "../slideKit";
 
 const TITLE = "توافق النتائج بين المستويات والمصادر";
 const SUBHEAD = "نسبة تطابق النتيجة بين كل مصدرين، ومقارنة كل مصدر بنتيجة المراجع.";
-const EYEBROW = "القسم 3 — التحاليل المتقدمة";
+const EYEBROW = "القسم 3 - التحاليل المتقدمة";
 
 /** Required verbatim on the slide — the asymmetric-scope disclosure. */
 const SCOPE_FOOTNOTE =
@@ -99,7 +99,7 @@ const LEVEL_FOOTNOTE =
  * legitimate pooled total and is left as-is.
  */
 const PAIR_NO_TOTAL_NOTE =
-  "لا يوجد إجمالي واحد صحيح لهذا الجدول: كل صورة تدخل في حتى 5 أزواج مقارنة، فجمع عمود العيّنة عبر الأزواج الخمسة عشر يُكرر عدّ الصور نفسها — لذلك لم يُعرض هنا.";
+  "لا يوجد إجمالي واحد صحيح لهذا الجدول: كل صورة تدخل في حتى 5 أزواج مقارنة، فجمع عمود العيّنة عبر الأزواج الخمسة عشر يُكرر عدّ الصور نفسها - لذلك لم يُعرض هنا.";
 
 /**
  * The six comparison sources, in the SAME order `aggregates.ts` builds the
@@ -259,7 +259,7 @@ function levelPairStatHtml(cells: CrossTeamMatrixCell[]): string {
   const n = cell ? cell.comparable : 0;
   return `<div class="s3sa-lvl-stat">
     <span class="s3sa-lvl-stat-icon" aria-hidden="true">${icon("check", 14)}</span>
-    <span>${esc("توافق المستوى الأول مع الثاني")} — <b>${pctCell(rate)}</b> · ${esc(`${fmtNum(n)} صورة`)}</span>
+    <span>${esc("توافق المستوى الأول مع الثاني")} - <b>${pctCell(rate)}</b> · ${esc(`${fmtNum(n)} صورة`)}</span>
   </div>`;
 }
 
@@ -403,7 +403,7 @@ function pageBody(model: ReportModel): string {
 // `n` even at 0, never color-alone, `esc()` every interpolation).
 // ════════════════════════════════════════════════════════════════════════════
 
-const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">-</span></td>`;
 
 /** One of the 15 unique source pairs, resolved against its real cross-team
  *  matrix cell. `a`/`b` are always `SOURCE_ORDER[ri]`/`SOURCE_ORDER[ci]` with
@@ -435,7 +435,7 @@ function orderedPairs(cells: CrossTeamMatrixCell[]): SourcePair[] {
 }
 
 function pairLabel(p: SourcePair): string {
-  return `${SOURCE_LABELS[p.a]} — ${SOURCE_LABELS[p.b]}`;
+  return `${SOURCE_LABELS[p.a]} - ${SOURCE_LABELS[p.b]}`;
 }
 
 // ── Ledger (fan-out plan §11d) ───────────────────────────────────────────────
@@ -494,7 +494,7 @@ function pairSubTable(chunk: SourcePair[], startIdx: number): string {
   const rows =
     chunk.length > 0
       ? chunk.map((p, i) => pairRowHtml(p, startIdx + i)).join("")
-      : `<tr><td colspan="${PAIR_COL_SPAN}"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="${PAIR_COL_SPAN}"><span class="insuff">-</span></td></tr>`;
   return `<table class="deck-table s3sa-lg-pair-table">
       <thead><tr><th>${esc("الزوج")}</th><th>${esc("التوافق %")}</th><th>${esc("العيّنة")}</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -602,12 +602,12 @@ function briefingBody(model: ReportModel): string {
   const supportStrip = briefingSupport([
     {
       iconName: "check",
-      value: highest ? pctCell(highest.cell.agreementRate) : "—",
+      value: highest ? pctCell(highest.cell.agreementRate) : "-",
       label: highest ? `أعلى زوج توافقًا: ${pairLabel(highest)}` : "أعلى زوج توافقًا",
     },
     {
       iconName: "alert",
-      value: lowest ? pctCell(lowest.cell.agreementRate) : "—",
+      value: lowest ? pctCell(lowest.cell.agreementRate) : "-",
       label: lowest ? `أدنى زوج توافقًا: ${pairLabel(lowest)}` : "أدنى زوج توافقًا",
     },
     { iconName: "scan", value: fmtNum(comparedCount), label: "عدد الأزواج المقارَنة" },
@@ -632,7 +632,7 @@ function briefingBody(model: ReportModel): string {
     rankItems.push({
       label: `أزواج دون حد الكفاية (${fmtNum(excluded.length)})`,
       value: null,
-      valueText: "—",
+      valueText: "-",
       secondaryText: "",
     });
     rawForFold.push({
@@ -667,7 +667,7 @@ function briefingBody(model: ReportModel): string {
     ${briefingLede({
       figure: pctCell(totals.totalRate),
       tone: "green",
-      label: `التوافق العام مع المراجع ${pctCell(totals.totalRate)} — ${fmtNum(totals.totalAgree)} من ${fmtNum(totals.totalComparable)} صورة`,
+      label: `التوافق العام مع المراجع ${pctCell(totals.totalRate)} - ${fmtNum(totals.totalAgree)} من ${fmtNum(totals.totalComparable)} صورة`,
       basis: REVIEWER_SCOPE_BASIS,
     })}
     ${supportStrip}
@@ -699,13 +699,13 @@ function gridReviewerMatrix(rows: ReviewerAgreementRow[]): string {
           values: rows.map((r) => gatedRate(r.comparable, r.agreementRate)),
         },
         {
-          label: "اشتباه لديه–سليمة للمراجع",
+          label: "اشتباه لديه-سليمة للمراجع",
           domain: [0, flaggedMax],
           ramp: "sequential-gold",
           values: rows.map((r) => r.teamFlaggedReviewerClean),
         },
         {
-          label: "سليمة لديه–اشتباه للمراجع",
+          label: "سليمة لديه-اشتباه للمراجع",
           domain: [0, clearedMax],
           ramp: "sequential-gold",
           values: rows.map((r) => r.teamClearedReviewerFlagged),
@@ -823,11 +823,11 @@ export const SOURCE_AGREEMENT_CSS = `
 .s3sa-rev .deck-table th{font-size:0.62rem;white-space:normal;line-height:1.25;}
 .s3sa-body{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;padding:7px 9px 9px;}
 /* The heatmap figure is width/height:100% of this box and letterboxes itself
-   via preserveAspectRatio, so the box may flex freely — never a fixed width. */
+   via preserveAspectRatio, so the box may flex freely - never a fixed width. */
 .s3sa-chart{flex:1;min-height:0;}
 .s3sa-chart figure{height:100%;}
 
-/* ── Level1↔Level2 stat callout — sits above the levels×teams grid, both the
+/* ── Level1↔Level2 stat callout - sits above the levels×teams grid, both the
    default and Grid variants (2026-07-28 rework, see the doc comment above
    buildLevelsTeamsMatrix). ──────────────────────────────────────────────── */
 .s3sa-lvl-stat{
@@ -875,19 +875,19 @@ export const SOURCE_AGREEMENT_CSS = `
   .s3sa-foot,.s3sa-lvl-stat{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 
-/* ── Ledger — 15-pair table (fan-out plan §11d, batch B3 item 2) ─────────────
+/* ── Ledger - 15-pair table (fan-out plan §11d, batch B3 item 2) ─────────────
    .v2-lg-table-card's own margin-top:14px (theme.ts) assumes it sits below a
    preceding headline block; here it's a grid CELL inside .v2-lg-split, so
    that top margin is cancelled. Everything else reuses .v2-lg-table-card's
-   shared chrome (title style, card background) — only the 2-sub-column split
+   shared chrome (title style, card background) - only the 2-sub-column split
    and the pooled totals line are new, page-local shapes. */
 /* .s3sa-lg is the DIRECT parent of both .v2-lg-split and the .s3sa-foot
-   footnote strip (two children) — without this flex/min-height:0 chain,
+   footnote strip (two children) - without this flex/min-height:0 chain,
    .v2-lg-split's own height:100% (theme.ts default) fills the WHOLE
    container on its own, and the footnote then adds its height on top,
    overflowing past the slide's bottom edge (measured live in
    deck-preview.html: the footnote's own bottom edge sat ~33px past the
-   slide's — the pair table itself was never the problem). Mirrors the exact
+   slide's - the pair table itself was never the problem). Mirrors the exact
    working pattern .v2-agree-wrap already uses for the same two-children
    shape on slide-s3-port-agreement (portAgreement.ts). */
 .s3sa-lg{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}
@@ -896,7 +896,7 @@ export const SOURCE_AGREEMENT_CSS = `
 .s3sa-lg-pair-split{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;}
 /* Row-budget note: see the pairsLedgerCard doc comment above (sourceAgreement.ts)
    for the worked arithmetic. table-layout:fixed + explicit column widths
-   give الزوج's long "المصدر أ — المصدر ب" labels the most room a 3-column,
+   give الزوج's long "المصدر أ - المصدر ب" labels the most room a 3-column,
    ~240px-wide sub-table can spare (measured live in deck-preview.html: without
    this the browser's auto column sizing under-allocated the label column,
    causing 3-line wraps that pushed the whole card past its available flex
@@ -913,7 +913,7 @@ export const SOURCE_AGREEMENT_CSS = `
 .s3sa-lg-pairs .v2-lg-idx{width:13px;height:13px;font-size:.46rem;margin-inline-end:3px;}
 /* 2026-07-28 fix (C6): this bar used to hold a 3-span الإجمالي row (label /
    rate / count); it now holds a single explanatory sentence (no honest total
-   exists for this table — see PAIR_NO_TOTAL_NOTE), so weight/line-height are
+   exists for this table - see PAIR_NO_TOTAL_NOTE), so weight/line-height are
    tuned for prose instead of a bold single-line figure. */
 .s3sa-lg-pair-totals{
   display:flex;align-items:center;gap:8px;margin-top:8px;
@@ -924,11 +924,11 @@ body.theme-light .s3sa-lg-pair-totals{
   color:rgba(10,45,74,.92);background:rgba(10,45,74,.05);border-color:rgba(10,45,74,.15);
 }
 
-/* ── Briefing — namespacing hook only (design spec §3.1); nothing bespoke
+/* ── Briefing - namespacing hook only (design spec §3.1); nothing bespoke
    beyond the shared lede/support/rank-list components. ──────────────────── */
 .s3sa-bf{height:100%;}
 
-/* ── Grid — the heatmap panel stacks its chart above the ن grid inside one
+/* ── Grid - the heatmap panel stacks its chart above the ن grid inside one
    gridPanel chart slot, reusing the already-shared .s3sa-chart/.s3sa-ngrid
    sizing rules above (both are plain global class names, not scoped under
    .s3sa, so they apply here unchanged). ─────────────────────────────────── */

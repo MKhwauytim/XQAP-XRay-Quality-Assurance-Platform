@@ -136,9 +136,35 @@ export function makeUniqueHeaders(headers: string[]): string[] {
   });
 }
 
+export type WorksheetToSourceRowsOptions = {
+  /**
+   * "first" (default): the first non-empty row is the header.
+   * "widest": the fullest of the first {@link HEADER_SCAN_ROWS} non-empty rows
+   * (earliest wins a tie) — for hand-built sheets that open with a title or a
+   * navigation row above the real header.
+   */
+  headerRow?: "first" | "widest";
+};
+
+const HEADER_SCAN_ROWS = 10;
+
+function widestLeadingRowIndex(rows: ReadonlyArray<{ row: RawCell[] }>): number {
+  let best = 0;
+  let bestCount = -1;
+  for (let i = 0; i < Math.min(rows.length, HEADER_SCAN_ROWS); i += 1) {
+    const count = rows[i].row.filter((cell) => !isBlankCell(cell)).length;
+    if (count > bestCount) {
+      best = i;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 export function worksheetToSourceRows<TSourceRow extends Record<string, unknown>>(
   utils: WorksheetUtils,
-  worksheet: WorkSheet
+  worksheet: WorkSheet,
+  options: WorksheetToSourceRowsOptions = {}
 ): SourceRowWithMeta<TSourceRow>[] {
   // Must run before sheet_to_json so large-number cells are already strings.
   preprocessLargeNumbers(worksheet);
@@ -167,8 +193,9 @@ export function worksheetToSourceRows<TSourceRow extends Record<string, unknown>
     return [];
   }
 
-  const headerRow = nonEmptyRowsWithOriginalIndex[0].row.map(cleanHeader);
-  const dataRows = nonEmptyRowsWithOriginalIndex.slice(1);
+  const headerIndex = options.headerRow === "widest" ? widestLeadingRowIndex(nonEmptyRowsWithOriginalIndex) : 0;
+  const headerRow = nonEmptyRowsWithOriginalIndex[headerIndex].row.map(cleanHeader);
+  const dataRows = nonEmptyRowsWithOriginalIndex.slice(headerIndex + 1);
 
   const validColumnIndexes = headerRow
     .map((header, index) => ({ header, index }))

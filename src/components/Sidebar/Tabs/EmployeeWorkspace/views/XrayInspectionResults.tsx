@@ -112,8 +112,8 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
         { value: L.status_replaced,  label: L.status_replaced },
       ],
       accessor: () => null },
-    { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
-    { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
+    { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult || L.result_not_recorded },
+    { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult || L.result_not_recorded },
     { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  ...certScanStatusFilterProps(L), accessor: (e) => e.row.certScanStatus },
     { id: "declarationNumber",      label: L.col_declaration_number,        widthFr: 11, accessor: (e) => e.row.declarationNumber },
     { id: "declarationDate",        label: L.col_declaration_date,          widthFr: 11, isDate: true, accessor: (e) => e.row.declarationDate },
@@ -581,12 +581,14 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     [auditEvents, auditReferralRequests, auditReplacementRequests, canSeeAll, username, viewMode]
   );
 
-  // The tracking tab counts the SELECTED MONTH's sample only: ad-hoc imports
-  // live in synthetic months of their own and would inflate its totals.
+  // The tracking tab counts every case the results table shows for the month —
+  // the month's own sample AND the ad-hoc imports linked to it (owner request
+  // 2026-11-01: daily follow-up must cover all studied cases, not only the
+  // index sample). `loadAdhocEntriesForEmployeeView` already scopes those to
+  // the selected month.
   const trackingRows = useMemo<TrackingRow[]>(() => {
     const out: TrackingRow[] = [];
     for (const row of rows) {
-      if (isAdhocEntry(row.entry)) continue;
       const rowTemplate = resolveTemplateForAnswer(row.answer, templatesById, template);
       const state = classifyAnswerState(row.entry.status, row.answer, rowTemplate);
       if (state === "replaced") continue;
@@ -598,6 +600,20 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     }
     return out;
   }, [rows, template, templatesById]);
+
+  // The follow-up period starts at the month's first distribution: each
+  // employee's earliest `assigned` event, or their quota stamp when earlier.
+  const trackingAssignedAt = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = { ...assignedAtByUser };
+    const ms = (iso: string | undefined) => (iso ? Date.parse(iso) : NaN);
+    for (const event of auditEvents) {
+      if (event.eventType !== "assigned" || !event.assignedTo) continue;
+      const at = ms(event.eventAt);
+      const cur = ms(out[event.assignedTo]);
+      if (!Number.isNaN(at) && (Number.isNaN(cur) || at < cur)) out[event.assignedTo] = event.eventAt;
+    }
+    return out;
+  }, [assignedAtByUser, auditEvents]);
 
   const answerFields = useMemo(
     () => mergeTemplateFields(templatesById),
@@ -881,7 +897,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
           key={selectedMonth}
           monthFolder={selectedMonth}
           rows={trackingRows}
-          assignedAtByUser={assignedAtByUser}
+          assignedAtByUser={trackingAssignedAt}
           directoryHandle={directoryHandle}
           canEditDeadline={role === "admin"}
           username={username}

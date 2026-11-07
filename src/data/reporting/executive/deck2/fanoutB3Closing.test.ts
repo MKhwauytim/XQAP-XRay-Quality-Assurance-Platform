@@ -139,7 +139,7 @@ describe("slide-closing Ledger — provenance table (fan-out plan §10)", () => 
     expect(model.dataSources.biMatchedCount).toBe(1);
     const html = closingSlide(model, undefined, 7, 20, true);
     const panel1 = panelSlice(html, 1);
-    expect(panel1).toContain(`مُقدَّم — أثرى ${fmtNum(1)} صورة`);
+    expect(panel1).toContain(`مُقدَّم - أثرى ${fmtNum(1)} صورة`);
     expect(panel1).not.toContain("غير مُقدَّم هذا الشهر");
   });
 
@@ -148,7 +148,7 @@ describe("slide-closing Ledger — provenance table (fan-out plan §10)", () => 
     const html = closingSlide(model, undefined, 7, 20, true);
     const panel1 = panelSlice(html, 1);
     expect(panel1).toContain(
-      `<tr class="v2-lg-footnote"><td colspan="3">داخلي — للاستخدام التنفيذي · ${model.summary.periodId}</td></tr>`,
+      `<tr class="v2-lg-footnote"><td colspan="3">داخلي - للاستخدام التنفيذي · ${model.summary.periodId}</td></tr>`,
     );
     // it's genuinely inside <tfoot>, not a stray row dumped in <tbody>.
     const tfootStart = panel1.indexOf("<tfoot>");
@@ -292,7 +292,7 @@ describe("slide-closing Grid — reuses the Ledger table verbatim (fan-out plan 
     // whitespace-level divergence.
     expect(gridTable).toBe(ledgerTable);
     expect(ledgerTable).toContain("population.final.json");
-    expect(ledgerTable).toContain(`مُقدَّم — أثرى ${fmtNum(1)} صورة`);
+    expect(ledgerTable).toContain(`مُقدَّم - أثرى ${fmtNum(1)} صورة`);
 
     // The verbatim org block (badge + org name + period) is ALSO identical
     // between the two slots — same closingOrgBlock() call, not a per-slot copy.

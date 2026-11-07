@@ -87,8 +87,8 @@ export function buildPopulationByPort(model: ReportModel, pageNo: string): strin
 
   const body = `${pageHeader({ iconName: "port", eyebrow: "الجزء الأول · النطاق", title: "المجتمع حسب المنفذ", subtitle: "التركّز والتوزيع" })}
     ${kpiStrip([
-      kpi({ label: "أعلى منفذ", value: top ? top.portName : "—", tone: "gold" }),
-      kpi({ label: "حصة أعلى منفذ", value: topShare === null ? "—" : fmtPct(topShare), tone: "blue" }),
+      kpi({ label: "أعلى منفذ", value: top ? top.portName : "-", tone: "gold" }),
+      kpi({ label: "حصة أعلى منفذ", value: topShare === null ? "-" : fmtPct(topShare), tone: "blue" }),
       kpi({ label: "عدد المنافذ", value: fmtNum(ports.length), tone: "slate" }),
     ], 3)}
     <div class="grid grid-2" style="margin-top:14px">
@@ -168,8 +168,8 @@ export function buildDataQualityExclusions(model: ReportModel, pageNo: string): 
       ${panel("ملاحظات جودة البيانات", `
         <ul class="doc-list">
           <li>${esc(model.exclusions.note)}</li>
-          <li>${model.dataQuality.inspectorIdentityMapped ? "هوية المفتش مرتبطة عبر BI." : "هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض الدقة الفردية كصورة فارغة."}</li>
-          <li>القيم الناقصة تُعرض "—" ولا تُحتسب كـ "0%".</li>
+          <li>${model.dataQuality.inspectorIdentityMapped ? "هوية المفتش مرتبطة عبر BI." : "هوية المفتش غير مرتبطة (لم تتم مطابقة BI) - تُعرض الدقة الفردية كصورة فارغة."}</li>
+          <li>القيم الناقصة تُعرض "-" ولا تُحتسب كـ "0%".</li>
         </ul>`)}
     </div>
     ${noteBox(`نطاق كفاية البيانات الإجمالي: ${bandLabel(model.dataQuality.overallBand)}.`, "alert")}

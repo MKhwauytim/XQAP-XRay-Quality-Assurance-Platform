@@ -115,7 +115,7 @@ export function miniTable(opts: { headers: string[]; rows: (string | number | nu
     .map(
       (r) =>
         `<tr>${r
-          .map((c) => `<td>${c === null ? '<span class="insuff">—</span>' : esc(String(c))}</td>`)
+          .map((c) => `<td>${c === null ? '<span class="insuff">-</span>' : esc(String(c))}</td>`)
           .join("")}</tr>`,
     )
     .join("");

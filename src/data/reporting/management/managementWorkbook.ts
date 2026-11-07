@@ -20,7 +20,7 @@ import { computeManagementModel, type ManagementModel, type ManagementBucket } f
 
 type Cell = string | number;
 
-const DASH = "—";
+const DASH = "-";
 
 function pct(value: number | null | undefined): Cell {
   return value === null || value === undefined ? "" : Number(value.toFixed(2));
@@ -34,11 +34,11 @@ function text(value: string | null | undefined): Cell {
 
 function summarySheet(m: ManagementModel): Cell[][] {
   return [
-    ["تقرير", "بيانات الإدارة — متابعة الإنجاز والمساءلة"],
+    ["تقرير", "بيانات الإدارة - متابعة الإنجاز والمساءلة"],
     ["الشهر", text(m.monthLabel)],
     ["تاريخ الاشتقاق", text(m.derivedAt)],
     [],
-    ["— المؤشرات الرئيسية —", ""],
+    ["- المؤشرات الرئيسية -", ""],
     ["إجمالي المعيّنة", m.totals.assigned],
     ["مكتملة", m.totals.completed],
     ["قيد الانتظار", m.totals.pending],
@@ -55,7 +55,7 @@ function bucketSheet(buckets: ManagementBucket[], groupLabel: string): Cell[][] 
     for (const e of b.employees) {
       rows.push([text(b.label), text(e.displayName), e.assigned, e.completed, pct(e.completionRate)]);
     }
-    rows.push([`المجموع — ${text(b.label)}`, "", b.totalAssigned, b.totalCompleted, pct(b.completionRate)]);
+    rows.push([`المجموع - ${text(b.label)}`, "", b.totalAssigned, b.totalCompleted, pct(b.completionRate)]);
   }
   if (buckets.length === 0) rows.push(["لا توجد بيانات توزيع بعد.", "", "", "", ""]);
   return rows;
@@ -69,7 +69,7 @@ function replacementsSheet(m: ManagementModel): Cell[][] {
     ]),
   ];
   if (m.replacements.byReason.length > 0) {
-    rows.push([], ["— الأسباب الأكثر تكراراً —", "", "", "", "", ""], ["السبب", "العدد", "", "", "", ""]);
+    rows.push([], ["- الأسباب الأكثر تكراراً -", "", "", "", "", ""], ["السبب", "العدد", "", "", "", ""]);
     for (const r of m.replacements.byReason) rows.push([text(r.reason), r.count, "", "", "", ""]);
   }
   return rows;
@@ -80,7 +80,7 @@ export function buildManagementWorkbookObject(
   employeeDisplayNames: Record<string, string> = {},
 ): XLSX.WorkBook {
   const empty: DistributionCurrentData = {
-    monthFolderName: input.monthFolderName, derivedAt: "—",
+    monthFolderName: input.monthFolderName, derivedAt: "-",
     totalAssigned: 0, totalCompleted: 0, totalReplaced: 0, totalPending: 0, entries: [],
   };
   const model = computeManagementModel(

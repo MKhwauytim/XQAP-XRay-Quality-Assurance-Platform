@@ -83,7 +83,8 @@ export function readWorkbookTablesFromBuffer(buffer: ArrayBuffer): SourceTable[]
       continue;
     }
 
-    const sourceRows = worksheetToSourceRows<Record<string, unknown>>(XLSX.utils, worksheet);
+    // "widest": operator files often carry a title or navigation row above the header.
+    const sourceRows = worksheetToSourceRows<Record<string, unknown>>(XLSX.utils, worksheet, { headerRow: "widest" });
     if (sourceRows.length === 0) {
       continue;
     }

@@ -1,0 +1,6 @@
+# Edge headless profile, converted Somar font files and every deck that carries embedded Somar
+# font data stay local (font licence: do not redistribute the font through git).
+.edge-profile/
+fonts/
+*embed*.pptx
+dbg.mjs

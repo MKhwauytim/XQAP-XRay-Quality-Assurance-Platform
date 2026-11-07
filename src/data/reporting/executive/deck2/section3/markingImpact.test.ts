@@ -173,7 +173,7 @@ describe("markingImpactSlide — slide shell", () => {
     expect(html).toContain('id="slide-s3-marking"');
     expect(html).toContain('data-section="section3"');
     expect(html).toContain('data-title="أثر وجود التحديد على الدقة"');
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain("مقارنة دقة القرارات في صور الاشتباه (المستوى الأول أو الثاني) التي يوجد بها تحديد مقابل التي لا يوجد بها.");
     expect(html).toContain("12 / 24");
   });
@@ -287,7 +287,7 @@ describe("markingImpactSlide — both strata populated", () => {
     expect(html).not.toContain("<b>85.7%</b><small>كشف الاشتباه</small>");
     expect(html).not.toContain("<b>50.0%</b><small>كشف الاشتباه</small>");
     const suppressed = [
-      ...html.matchAll(/<span class="accent"><b><span class="insuff">—<\/span><\/b><small>كشف الاشتباه<\/small><\/span>/g),
+      ...html.matchAll(/<span class="accent"><b><span class="insuff">-<\/span><\/b><small>كشف الاشتباه<\/small><\/span>/g),
     ];
     expect(suppressed.length).toBe(2);
   });
@@ -358,7 +358,7 @@ describe("markingImpactSlide — sufficiency suppression", () => {
   });
 
   it("shows the under-cut arm as — rather than a flattering 100%", () => {
-    expect(html).toContain('<b><span class="insuff">—</span></b>');
+    expect(html).toContain('<b><span class="insuff">-</span></b>');
     expect(html).not.toContain("100.0%");
     // ...while the sufficient arm keeps its figure.
     expect(html).toContain("<b>70.0%</b><span>دقة قرارات الفحص</span>");
@@ -478,7 +478,7 @@ describe("markingImpactSlide — Ledger (fan-out)", () => {
     );
     expect(preview).toContain('<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td>');
     // Same effect slot-0's chip prints for this exact fixture (90.0 − 70.0 = +20.0).
-    expect(preview).toContain('<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>—</td><td><span dir="ltr">+20.0</span></td>');
+    expect(preview).toContain('<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>-</td><td><span dir="ltr">+20.0</span></td>');
   });
 
   it("gates the tfoot الفارق row with the SAME rule slot-0's deltaChip uses — both render — together when one arm is below the sufficiency cut", () => {
@@ -495,7 +495,7 @@ describe("markingImpactSlide — Ledger (fan-out)", () => {
     expect(html).toContain('<div class="v2-mark-delta insufficient">');
     // The Ledger tfoot row, driven by the SAME `comparable()` call, must agree.
     expect(html).toContain(
-      '<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>—</td><td><span class="insuff">—</span></td>',
+      '<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>-</td><td><span class="insuff">-</span></td>',
     );
   });
 });
@@ -516,7 +516,7 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     // figure already used, so the sign renders on the correct side of the
     // digit instead of flipping under RTL's bidi algorithm.
     expect(preview).toContain(
-      'فارق الدقة <span dir="ltr">+20.0</span> نقطة — بتحديد 90.0% مقابل بلا تحديد 70.0%',
+      'فارق الدقة <span dir="ltr">+20.0</span> نقطة - بتحديد 90.0% مقابل بلا تحديد 70.0%',
     );
     // Both arms' detection rate is suppressed here (2026-07-30 fix): STRONG_ARM's
     // own detection base is correctSusp(6)+missedSusp(1)=7 and WEAK_ARM's is
@@ -524,7 +524,7 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     // the accuracy cut, so the rank rows' secondary text reads the muted "—"
     // instead of the raw 85.7%/50.0% ratios.
     const secondary = [
-      ...preview.matchAll(/<span class="v2-bf-rank-secondary">العيّنة 20 · كشف <span class="insuff">—<\/span><\/span>/g),
+      ...preview.matchAll(/<span class="v2-bf-rank-secondary">العيّنة 20 · كشف <span class="insuff">-<\/span><\/span>/g),
     ];
     expect(secondary.length).toBe(2);
     expect(preview).not.toContain("العيّنة 20 · كشف 85.7%");
@@ -543,10 +543,10 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     );
     // Slot 0's own gate output is the reference.
     expect(html).toContain('<div class="v2-mark-delta insufficient">');
-    expect(html).toContain(`<b class="v2-mark-delta-value"><span class="insuff">—</span></b>`);
+    expect(html).toContain(`<b class="v2-mark-delta-value"><span class="insuff">-</span></b>`);
     // Briefing's lede fallback: the SAME insufficiency note, not a different phrase.
-    expect(html).toContain(`فارق الدقة — ${INSUFFICIENT}`);
-    const insuffFigureCount = [...html.matchAll(/<span class="insuff">—<\/span>/g)].length;
+    expect(html).toContain(`فارق الدقة - ${INSUFFICIENT}`);
+    const insuffFigureCount = [...html.matchAll(/<span class="insuff">-<\/span>/g)].length;
     // Slot 0's chip AND the Briefing lede both render the muted "—" figure —
     // proving the two variants agree on the SAME comparability verdict for
     // this fixture (a divergent/looser Briefing gate would drop this to 1).
@@ -605,7 +605,7 @@ describe("markingImpactSlide — Grid (fan-out)", () => {
     // though n=50 clears the accuracy cut, so كشف الاشتباه reads "—", not the
     // raw 62.5% ratio.
     expect(preview).toContain(
-      '<tr><th scope="row">يوجد تحديد</th><td>90</td><td>—</td><td>80</td><td>10</td><td>6</td><td>4</td></tr>',
+      '<tr><th scope="row">يوجد تحديد</th><td>90</td><td>-</td><td>80</td><td>10</td><td>6</td><td>4</td></tr>',
     );
   });
 
@@ -620,7 +620,7 @@ describe("markingImpactSlide — Grid (fan-out)", () => {
       true,
     );
     expect(preview).toContain(
-      '<tr><th scope="row">لا يوجد تحديد</th><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>',
+      '<tr><th scope="row">لا يوجد تحديد</th><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>',
     );
     // The rankable arm keeps its real figures in the very same matrix.
     expect(preview).toContain('<tr><th scope="row">يوجد تحديد</th><td>90</td>');

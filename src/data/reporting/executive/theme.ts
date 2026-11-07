@@ -52,7 +52,7 @@ button,input,select{font:inherit}
   min-height:100vh;
 }
 
-/* ── Sidebar — premium, not stock ─────────────────────────────────────── */
+/* ── Sidebar - premium, not stock ─────────────────────────────────────── */
 .sidebar{
   position:sticky;
   top:0;
@@ -153,7 +153,7 @@ button,input,select{font:inherit}
 /* Push the page number to the bottom regardless of content height. */
 .page-inner > .page-no{margin-top:auto;}
 
-/* ── Right rail — reads cleanly ───────────────────────────────────────── */
+/* ── Right rail - reads cleanly ───────────────────────────────────────── */
 .right-rail{
   position:absolute;right:0;top:0;bottom:0;width:44px;min-width:44px;
   background:linear-gradient(180deg,rgba(3,23,42,.96),rgba(9,42,69,.96));
@@ -192,7 +192,7 @@ button,input,select{font:inherit}
   color:rgba(255,255,255,.55);
 }
 
-/* ── Page number — refined ────────────────────────────────────────────── */
+/* ── Page number - refined ────────────────────────────────────────────── */
 .page-no{
   position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
   font-size:0.72rem;font-weight:600;color:rgba(255,255,255,.25);
@@ -210,7 +210,7 @@ h1{font-size:42px;line-height:1.18;margin:6px 0 10px}
 .rule{height:2px;width:180px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:18px auto}
 .lead{max-width:760px;margin:22px auto 0;line-height:1.7;color:#dce7f2;font-size:14px}
 
-/* ── Section titles — visual weight contrast ──────────────────────────── */
+/* ── Section titles - visual weight contrast ──────────────────────────── */
 .section-title{
   font-size:1.55rem;font-weight:700;color:#fff;margin:18px 0 4px;
   position:relative;padding-bottom:10px;
@@ -238,7 +238,7 @@ h1{font-size:42px;line-height:1.18;margin:6px 0 10px}
 .grid-4{grid-template-columns:repeat(4,1fr)}
 .grid-5{grid-template-columns:repeat(5,1fr)}
 
-/* ── Cards — distinct, not generic ───────────────────────────────────── */
+/* ── Cards - distinct, not generic ───────────────────────────────────── */
 .card{
   background:linear-gradient(180deg,rgba(14,58,95,.82),rgba(7,39,67,.92));
   border:1px solid rgba(255,255,255,.14);
@@ -258,7 +258,7 @@ h1{font-size:42px;line-height:1.18;margin:6px 0 10px}
 .card.stage3::before{background:var(--slate);}
 .card.stage4::before{background:var(--coral);}
 
-/* ── Metrics — visually dominant ──────────────────────────────────────── */
+/* ── Metrics - visually dominant ──────────────────────────────────────── */
 .metric{
   font-size:2.2rem;font-weight:800;line-height:1;
   letter-spacing:-0.02em;margin:10px 0 4px;
@@ -281,7 +281,7 @@ h1{font-size:42px;line-height:1.18;margin:6px 0 10px}
   display:flex;align-items:flex-start;gap:10px;
 }
 
-/* ── Tables — zebra with intent, not filler ───────────────────────────── */
+/* ── Tables - zebra with intent, not filler ───────────────────────────── */
 .table-wrap{overflow:hidden;width:100%;border:1px solid rgba(255,255,255,.12);border-radius:16px}
 table{table-layout:fixed;width:100%;border-collapse:collapse;background:rgba(4,31,54,.72)}
 td,th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 10px}
@@ -298,7 +298,7 @@ tbody tr:nth-child(even){background:rgba(255,255,255,.025);}
 tbody tr:hover{background:rgba(244,180,0,.04);}
 .total-row td{background:rgba(244,180,0,.08);font-weight:800;border-top:1px solid rgba(244,180,0,.25);}
 
-/* ── Chips — real status badges ───────────────────────────────────────── */
+/* ── Chips - real status badges ───────────────────────────────────────── */
 .chip{
   display:inline-flex;align-items:center;gap:4px;
   padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;
@@ -329,8 +329,8 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .land{border-color:rgba(139,195,74,.45)} .sea{border-color:rgba(107,169,248,.45)}
 .land .panel-title{color:var(--green)} .sea .panel-title{color:var(--blue)}
 
-/* ── Part divider pages — grand, not a PowerPoint slide ──────────────── */
-/* Grand part divider — three vertical bands (top header / center title / bottom toc),
+/* ── Part divider pages - grand, not a PowerPoint slide ──────────────── */
+/* Grand part divider - three vertical bands (top header / center title / bottom toc),
    anchored by a giant ghost numeral painted across the whole page. */
 .big-divider{
   display:flex;flex-direction:column;
@@ -410,7 +410,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   position:absolute;bottom:22px;left:50%;transform:translateX(-50%);z-index:2;
 }
 
-/* ── Sparse-data context band — fills the lower third of data pages ───── */
+/* ── Sparse-data context band - fills the lower third of data pages ───── */
 .context-band{
   display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;
   flex:1 1 auto;align-items:stretch;
@@ -571,7 +571,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .page.toc-page .appendix-list span{display:block;color:#dce7f2;font-size:13px;position:relative;padding-right:14px;}
 .page.toc-page .appendix-list span::before{content:"";position:absolute;right:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--gold);}
 
-/* ── Responsive (screen only — an unqualified query here would also match
+/* ── Responsive (screen only - an unqualified query here would also match
    the ~794px-wide A4 print page box and collapse printed document reports
    to this mobile layout; scoped 2026-07-21) ─────────────────────────────── */
 @media screen and (max-width:980px){
@@ -592,14 +592,14 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   .big-divider .divider-toc{grid-template-columns:1fr;}
 }
 
-/* ── Document renderer (Phase 3) — fixed A4 budget, no runtime scaling ─────── */
+/* ── Document renderer (Phase 3) - fixed A4 budget, no runtime scaling ─────── */
 /* Eyebrow header (icon + label) above each section title. */
 .doc-eyebrow{display:flex;align-items:center;gap:8px;color:var(--gold);
   font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;}
 .doc-eyebrow-icon{display:inline-flex;color:var(--gold);}
 .doc-eyebrow-icon svg{display:block;}
 
-/* KPI strip — the 5-second headline numbers. */
+/* KPI strip - the 5-second headline numbers. */
 .doc-kpi-strip{margin-top:14px;}
 .doc-kpi{padding:12px 14px;}
 .doc-kpi-label{font-size:0.72rem;color:var(--muted);font-weight:600;}
@@ -679,7 +679,7 @@ export const EXEC_DOCUMENT_PRINT_CSS = `
   .viewer{display:block;}
   .content{padding:0;background:transparent;}
   .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
-  /* Not ":last-child" — the source-revisions footer (sourceRevisions.ts) is
+  /* Not ":last-child" - the source-revisions footer (sourceRevisions.ts) is
      appended after the slides/pages, so the true last .page is never the
      last DOM child when it's present; that left the real last page still
      carrying break-after:page, printing the footer alone on a stray extra

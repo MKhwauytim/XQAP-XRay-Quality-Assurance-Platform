@@ -44,8 +44,9 @@ export type PreparedPopulationRow = {
   chassisNumber: string | null;
   finalDestination?: string | null;
 
-  xrayLevelOneResult: "سليمة" | "اشتباه";
-  xrayLevelTwoResult: "سليمة" | "اشتباه";
+  /** "" = not yet recorded: a case added from Excel before its results were known (v159.2). */
+  xrayLevelOneResult: "سليمة" | "اشتباه" | "";
+  xrayLevelTwoResult: "سليمة" | "اشتباه" | "";
 
   movementType: string | null;
   movementNumber?: string | null;

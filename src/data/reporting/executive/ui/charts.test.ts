@@ -49,7 +49,7 @@ describe("rankedBar", () => {
   it("handles empty data with a neutral placeholder", () => {
     const svg = rankedBar([], {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("does not divide by zero when all values are zero", () => {
@@ -92,7 +92,7 @@ describe("donut", () => {
   it("handles empty / zero-total data", () => {
     const svg = donut([], {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
     expect(svg).not.toContain("NaN");
   });
 
@@ -167,7 +167,7 @@ describe("gauge", () => {
   it("renders a placeholder for null", () => {
     const svg = gauge(null, {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("renders 0%/100% axis-reference ticks at the ends of the dial", () => {
@@ -195,7 +195,7 @@ describe("groupedBars", () => {
   it("handles empty data", () => {
     const svg = groupedBars({ groups: [], series: [] }, {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("does not divide by zero when all values zero", () => {
@@ -264,7 +264,7 @@ describe("stackedBars", () => {
   it("handles empty data", () => {
     const svg = stackedBars({ groups: [], series: [] }, {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("handles all-zero stacks without divide-by-zero", () => {
@@ -307,7 +307,7 @@ describe("quadrantScatter", () => {
   it("handles empty data", () => {
     const svg = quadrantScatter([], {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("clamps out-of-range coordinates", () => {
@@ -336,7 +336,7 @@ describe("heatmap", () => {
   it("handles empty data", () => {
     const svg = heatmap({ rows: [], cols: [], values: [] }, {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("handles all-zero matrix without divide-by-zero", () => {
@@ -380,7 +380,7 @@ describe("sparkline", () => {
   it("handles empty data", () => {
     const svg = sparkline([], {});
     assertSvg(svg);
-    expect(svg).toContain("—");
+    expect(svg).toContain("-");
   });
 
   it("handles a single point", () => {

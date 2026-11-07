@@ -159,7 +159,7 @@ describe("levelAccuracySlideBuilders — slide shell", () => {
     const html = render(buildModel([{ name: "منفذ ألف", portType: "منفذ بري", images: cleanImages(20) }]));
     expect(html).toContain('id="slide-s3-level-accuracy"');
     expect(html).toContain('data-section="section3"');
-    expect(html).toContain("القسم 3 — التحاليل المتقدمة");
+    expect(html).toContain("القسم 3 - التحاليل المتقدمة");
     expect(html).toContain("دقة إجابات المستوى الأول والثاني");
     expect(html).toContain("مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.");
     // iconName: "layers" — the eyebrow badge renders the registry's layers path.
@@ -296,7 +296,7 @@ describe("levelAccuracySlideBuilders — data-sufficiency gate", () => {
 
   it("renders — for both levels and for الفارق below the cut", () => {
     const row = rowHtml(html, "منفذ قليل");
-    const insuffCells = row.match(/<td class="v2-bar-cell neutral"><span class="insuff">—<\/span><\/td>/g) ?? [];
+    const insuffCells = row.match(/<td class="v2-bar-cell neutral"><span class="insuff">-<\/span><\/td>/g) ?? [];
     expect(insuffCells).toHaveLength(3); // L1 accuracy, L2 accuracy, الفارق
     expect(row).not.toContain("%");
   });
