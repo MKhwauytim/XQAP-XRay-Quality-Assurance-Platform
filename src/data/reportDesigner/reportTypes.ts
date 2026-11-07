@@ -83,6 +83,8 @@ export type Page = {
 export type DataSourceRef = { id: string; tableId: string; label: string };
 
 export type ReportDocument = {
+  /** Absent means schema v1; v2 documents are `ReportDocumentV2` (reportTypesV2.ts). */
+  schemaVersion?: 1;
   reportId: string;
   reportName: string;
   version: number;

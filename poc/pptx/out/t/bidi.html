@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<div dir="rtl" id="a" style="font:30px Arial;white-space:nowrap">بلغت نسبة المطابقة 85.5% من أصل 48,250 حالة</div>
+<div dir="rtl" id="b" style="font:30px Arial;white-space:nowrap">بلغت نسبة المطابقة &#x200E;85.5%&#x200E; من أصل 48,250 حالة</div>
+<div dir="rtl" id="c" style="font:30px Arial;white-space:nowrap">85.5%</div>
+<div dir="rtl" id="d" style="font:30px Arial;white-space:nowrap">2026-11-05</div>
+<pre id="out"></pre><script>
+const r={};for(const id of ['a','b','c','d']){const n=document.getElementById(id).firstChild;const t=n.textContent;const pos=ch=>{const i=t.indexOf(ch);const g=document.createRange();g.setStart(n,i);g.setEnd(n,i+1);return Math.round(g.getBoundingClientRect().left)};r[id]= id==='d'?{y2026:pos('2'),d05:pos('0',)} : {pct:pos('%'),eight:pos('8')};}
+document.getElementById('out').textContent='RESULT'+JSON.stringify(r)+'END';</script></body></html>

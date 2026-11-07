@@ -1,0 +1,766 @@
+{
+  "T1": {
+    "open": true,
+    "paragraphs": 765,
+    "rtl1algnR": 765,
+    "rtl0": 0,
+    "tables": 44,
+    "tblRtl": 44,
+    "lrm": 10,
+    "runRtl0": 513,
+    "slides": 13
+  },
+  "T3": [
+    {
+      "slide": 2,
+      "title": "تفاصيل المنافذ",
+      "rows": 15,
+      "headerRepeated": true,
+      "bottomPt": 495,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    },
+    {
+      "slide": 3,
+      "title": "تفاصيل المنافذ (يتبع)",
+      "rows": 15,
+      "headerRepeated": true,
+      "bottomPt": 495,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    },
+    {
+      "slide": 4,
+      "title": "تفاصيل المنافذ (يتبع)",
+      "rows": 10,
+      "headerRepeated": true,
+      "bottomPt": 370,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    }
+  ],
+  "T4": [
+    {
+      "i": 1,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 2,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 3,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 4,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 5,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 6,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 7,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 8,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 9,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 10,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 11,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 12,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 13,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 14,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 15,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 16,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 17,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 18,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 19,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 20,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 21,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 22,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 23,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 24,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 25,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 26,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 27,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 28,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 29,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 30,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 31,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 32,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 33,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 34,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 35,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 36,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 37,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 38,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 39,
+      "step": 5,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 40,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    }
+  ],
+  "T3somar": [
+    {
+      "slide": 2,
+      "title": "تفاصيل المنافذ",
+      "rows": 15,
+      "headerRepeated": true,
+      "bottomPt": 495,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    },
+    {
+      "slide": 3,
+      "title": "تفاصيل المنافذ (يتبع)",
+      "rows": 15,
+      "headerRepeated": true,
+      "bottomPt": 495,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    },
+    {
+      "slide": 4,
+      "title": "تفاصيل المنافذ (يتبع)",
+      "rows": 10,
+      "headerRepeated": true,
+      "bottomPt": 370,
+      "slideHpt": 540,
+      "insideSlide": true,
+      "multiLineCells": 0
+    }
+  ],
+  "T4somar": [
+    {
+      "i": 1,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 2,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 3,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 4,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 5,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 6,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 7,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 8,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 9,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 10,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 11,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 12,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 13,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 14,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 15,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 16,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 17,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 18,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 19,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 20,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 21,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 22,
+      "step": 2,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 23,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 24,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 25,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 26,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 27,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 28,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 29,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 30,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 31,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 32,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 33,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 34,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 35,
+      "step": 3,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 36,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 37,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 38,
+      "step": 4,
+      "expectedLines": 2,
+      "pptLines": 2,
+      "match": true
+    },
+    {
+      "i": 39,
+      "step": 5,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    },
+    {
+      "i": 40,
+      "step": 1,
+      "expectedLines": 1,
+      "pptLines": 1,
+      "match": true
+    }
+  ],
+  "html": [
+    {
+      "id": "T1",
+      "cells": 15,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T3-1",
+      "cells": 80,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T3-2",
+      "cells": 80,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T3-3",
+      "cells": 55,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-1",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-2",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-3",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-4",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-5",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-6",
+      "cells": 72,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T4-7",
+      "cells": 48,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T5",
+      "cells": 0,
+      "clipped": 0,
+      "outside": 0
+    },
+    {
+      "id": "T6",
+      "cells": 0,
+      "clipped": 0,
+      "outside": 0
+    },
+    []
+  ],
+  "T5": {
+    "group": true,
+    "items": 9,
+    "shapes": 5,
+    "connectors": 4,
+    "connectorsGlued": 4,
+    "editedText": "تعديل",
+    "movedLeft": 200
+  },
+  "T6": {
+    "freeform": true,
+    "type": 5,
+    "nodes": 5,
+    "text": "شكل حر قابل للتعديل",
+    "editedText": "نص جديد",
+    "nodesAfterInsert": 6
+  },
+  "G2": {
+    "mediaFiles": 1,
+    "picElements": 0
+  },
+  "G10": {
+    "deckTextHits": 0,
+    "filesWithHits": [
+      "model.mjs",
+      "RESULTS.md",
+      "toHtml.mjs",
+      "toPptx.mjs"
+    ]
+  },
+  "T7": {
+    "tests-embed-eot": {
+      "open": true
+    },
+    "tests-embed-ttf": {
+      "open": true
+    },
+    "tests-embed-glyf-eot": {
+      "open": true
+    },
+    "tests-embed-glyf-ttf": {
+      "open": true
+    }
+  }
+}
