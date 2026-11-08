@@ -47,7 +47,7 @@ function selectedYears(): string[] {
   return Array.from(yearsBox.querySelectorAll<HTMLInputElement>("input:checked")).map((i) => i.value);
 }
 
-/** «من 1 يناير 2024 إلى 30 سبتمبر 2026» for the chosen years and last month. */
+/** «من 1 يناير 2025 إلى 30 سبتمبر 2026» for the chosen years and last month. */
 function periodText(): string {
   const years = selectedYears().sort();
   const last = lastMonthSelect.value;
@@ -78,8 +78,8 @@ function showOptions(d: PortReportData): void {
     }
   }
   const years = [...new Set(months.map((m) => m.slice(0, 4)))];
-  // 2024 is left out by default (the owner removed it from the report); tick it to include it.
-  yearsBox.innerHTML = years.map((y) => `<label class="chip"><input type="checkbox" value="${y}"${y === "2024" && years.length > 1 ? "" : " checked"}> ${y}</label>`).join("");
+  // monthRange starts at 2025: 2024 is never part of the report.
+  yearsBox.innerHTML = years.map((y) => `<label class="chip"><input type="checkbox" value="${y}" checked> ${y}</label>`).join("");
   lastMonthSelect.innerHTML = months.slice().reverse().map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join("");
   periodInput.dataset.edited = "";
   refreshPeriod();

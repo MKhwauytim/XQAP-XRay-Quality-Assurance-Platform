@@ -28,7 +28,6 @@ import { esc, fmtNum } from "../executive/primitives";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../branding/organization";
 import type { AccuracyTier, OutcomeStats, PortReportModel, ScopeSummary } from "./portReportModel";
 import { MIN_TIER_SAMPLE } from "./portReportModel";
-import { PRINT_DEFAULT_OFF_CLASS } from "../executive/printSelection";
 import { workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
 import { buildPortObservations } from "./portObservations";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
@@ -103,6 +102,8 @@ function statStack(items: Array<{ label: string; value: string; tone?: string }>
 
 /** Page footers are written before the slide count is known; this token is swapped for it afterwards. */
 const TOTAL_TOKEN = -1;
+const NUM_BASE = 900000;
+const W1 = "أثر العبء التشغيلي على المنفذ";
 
 export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSlideInput): string {
   const footText = `تقرير أعمال ${m.displayName} · ${m.periodLabel}`;
@@ -112,14 +113,22 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
   const pagesOf = (n: number) => Math.max(1, Math.ceil(n / EMPLOYEE_ROWS_PER_PAGE));
   const total = TOTAL_TOKEN;
   let n = 1;
-  const meta = (key: string, label: string): SlideMeta => ({ num: n++, total, sectionKey: key, sectionLabel: label, footText });
+  const meta = (key: string, label: string): SlideMeta => ({ num: NUM_BASE + n++, total, sectionKey: key, sectionLabel: label, footText });
   const org: OrgBlock = { logoUrl: ZATCA_LOGO_URL, orgName: ORG_NAME, lines: [`قطاع ${ORGANIZATION_PATH[0]}`, DEPARTMENT] };
   const s = m.selected;
   const a = m.allPorts;
-  const parts: string[] = [];
+  // Slides go into named buckets and are assembled in the order of the mode below; page numbers are
+  // placeholders (NUM_BASE + creation order) until then, renumbered in display order at the end.
+  const B: Record<string, string[]> = {};
+  const b = (key: string): string[] => (B[key] ??= []);
+  // With workload data the report has three main sections, and the earlier sections become appendices أ–د.
+  const A1 = workload ? "ملحق أ - مجتمع الحالات الواردة والعينة المدروسة" : S1;
+  const A2 = workload ? "ملحق ب - نتائج الدراسة" : S2;
+  const A3 = workload ? `ملحق ج - معدل دقة موظفي ${m.displayName}` : S3;
+  const SEC3 = workload ? S2 : S3;
 
   // 1 — Cover
-  parts.push(
+  b("cover").push(
     coverSlide({
       org,
       kicker: "تقرير ضمان جودة فحص الأشعة",
@@ -139,13 +148,13 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
   // Main body (when the workbook carries row-level population with employee codes):
   // the four workload slides. Everything after them is the appendix.
   if (workload) {
-    parts.push(...workloadSlides(workload, meta));
-    parts.push(...observationSlides(m, workload, meta));
-    parts.push(sectionDivider({ eyebrow: footText, ghost: "+", kicker: "الملاحق", title: "الملاحق", description: "", footItems: [], meta: meta("appendix", "الملاحق") }));
+    b("wl").push(...workloadSlides(workload, meta));
+    b("obs").push(...observationSlides(m, workload, meta));
+    b("appDiv").push(sectionDivider({ eyebrow: footText, ghost: "+", kicker: "الملاحق", title: "الملاحق", description: "", footItems: [], meta: meta("appendix", "الملاحق") }));
   }
 
   // 2 — Glossary (same wording as the executive report)
-  parts.push(
+  b("gloss").push(
     glossarySlide({
       eyebrow: "المعجم",
       title: "المصطلحات الرئيسية",
@@ -173,7 +182,7 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
     }),
   );
   if (workload) {
-    parts.push(
+    b("gloss").push(
       glossarySlide({
         eyebrow: "المعجم",
         title: "مصطلحات العبء التشغيلي",
@@ -182,21 +191,23 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
             dotTone: "blue",
             title: "العبء والقوة العاملة",
             terms: [
-              { term: "الموظف المخصص للمنفذ", definition: "من فحص 30 حالة على الأقل من صور المنفذ في الشهر. إجمالي الموظفين المخصصين: كل من فحص حالات في المنفذ، دون تكرار؛ ومتوسط الموظفين في الشهر: متوسط عددهم شهراً بشهر." },
-              { term: "متوسط الحالات المفحوصة في الشهر للموظف", definition: "حالات الموظفين المخصصين للمنفذ في الشهر (المستوى الأول والثاني) ÷ عددهم. الصور بلا كود موظف لا تدخل في الحساب." },
-              { term: "مستوى العبء التشغيلي", definition: "لكل نوع منفذ (بري، بحري) على حدة: منخفض أقل من نصف متوسط النوع، وعالي أكثر من مرة ونصف، ومتوسط بينهما." },
+              { term: "الموظف المخصص للمنفذ", definition: "كل من فحص حالة واحدة على الأقل في المنفذ. الإجمالي: عددهم دون تكرار؛ والمتوسط: عددهم في كل شهر." },
+              { term: "متوسط عدد الحالات المفحوصة للموظف الواحد", definition: "حالات المنفذ في الشهر ÷ موظفيه، مع جمع حالات من فحص أقل من عُشر المتوسط واحتسابهم موظفين مكافئين." },
+              { term: "متوسط الحالات للموظف في الشهر حسب المستوى", definition: "حالات المستوى الأول ÷ موظفي المستوى الأول المخصصين في الشهر، وكذلك المستوى الثاني، بنفس قاعدة الموظف المخصص." },
+              { term: "مستوى العبء التشغيلي", definition: "المنافذ البرية والبحرية معاً مرتبة حسب حالات الموظف (أو الصور في الشهر) ومقسومة ثلاثة أثلاث متساوية: منخفض ومتوسط وعالي." },
+              { term: "مستوى الدقة", definition: "المنافذ التي دُرس منها 30 صورة فأكثر، مرتبة حسب نسبة التوائم ومقسومة ثلاثة أثلاث." },
             ],
           },
         ],
         meta: meta("glossary", "المعجم"),
       }),
     );
-    parts.push(workloadAppendixSlide(workload, meta));
+    b("wlApp").push(workloadAppendixSlide(workload, meta));
   }
 
   // 4 — Section 1 divider
-  parts.push(
-    sectionDivider({ eyebrow: footText, ghost: "01", kicker: workload ? "ملحق أ" : "القسم الأول", title: "مجتمع الحالات الواردة والعينة المدروسة", description: "", footItems: [], meta: meta("s1", S1) }),
+  b("div1").push(
+    sectionDivider({ eyebrow: footText, ghost: "01", kicker: workload ? "ملحق أ" : "القسم الأول", title: "مجتمع الحالات الواردة والعينة المدروسة", description: "", footItems: [], meta: meta("s1", A1) }),
   );
 
   // 5 — Population by port type: land | sea tables, then the selected port as its own figures block.
@@ -237,11 +248,11 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
         { label: "نسبة الاشتباه", value: pct(rate(s.populationSuspicion, s.population)), tone: "gold" },
       ]),
     }).replace('class="v3-panel all"', 'class="v3-panel all" style="flex:1;white-space:nowrap"')}</div>`;
-    parts.push(
+    b("pop").push(
       slideShell(
-        meta("s1", S1),
+        meta("s1", A1),
         "",
-        `${contentHead({ eyebrow: S1, title: "مجتمع الحالات الواردة حسب نوع المنفذ", note: `جميع المنافذ ${fmtNum(a.population)} صورة · نسبة الاشتباه ${pct(rate(a.populationSuspicion, a.population))}` })}
+        `${contentHead({ eyebrow: A1, title: "مجتمع الحالات الواردة حسب نوع المنفذ", note: `جميع المنافذ ${fmtNum(a.population)} صورة · نسبة الاشتباه ${pct(rate(a.populationSuspicion, a.population))}` })}
 <div class="v3-two-col" style="grid-template-columns:400px ${multi.map(() => "1fr").join(" ")};gap:32px;align-items:stretch;grid-template-rows:minmax(0,1fr);flex:none;height:740px">${own}${blocks}</div>`,
       ),
     );
@@ -276,11 +287,11 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
       toneB: "blue",
       valueFormat: (v) => fmtNum(Math.round(v)),
     });
-    parts.push(
+    b("pop").push(
       slideShell(
-        meta("s1", S1),
+        meta("s1", A1),
         "",
-        `${contentHead({ eyebrow: S1, title: `المجتمع والعينة المدروسة في ${m.displayName}`, note: `العينة ${pct(rate(s.image.studied, s.population))} من المجتمع` })}
+        `${contentHead({ eyebrow: A1, title: `المجتمع والعينة المدروسة في ${m.displayName}`, note: `العينة ${pct(rate(s.image.studied, s.population))} من المجتمع` })}
 ${yearly ? `<p class="v3-note" style="margin:0 0 10px;font-size:20px">حسب سنة دخول الصورة (المجتمع) وسنة التقاطها (العينة). لكل رسم مقياسه الخاص، ويبدأ كلاهما من الصفر.</p>` : legendRow([{ swatch: "gold", text: "المجتمع" }, { swatch: "blue", text: "العينة المدروسة" }], "المجتمع غير مقسَّم حسب السنة في ملف البيانات")}
 ${chart}
 <div style="margin-top:22px">${
@@ -312,8 +323,8 @@ ${chart}
   }
 
   // 8 — Section 2 divider
-  parts.push(
-    sectionDivider({ eyebrow: footText, ghost: "02", kicker: workload ? "ملحق ب" : "القسم الثاني", title: "نتائج الدراسة", description: "", footItems: [], meta: meta("s2", S2) }),
+  b("div2").push(
+    sectionDivider({ eyebrow: footText, ghost: "02", kicker: workload ? "ملحق ب" : "القسم الثاني", title: "نتائج الدراسة", description: "", footItems: [], meta: meta("s2", A2) }),
   );
 
   // 8 — Outcomes by port type: نسبة التوائم chart on one half, the table on the other
@@ -334,11 +345,11 @@ ${chart}
       { html: fmtNum(o.missed), cls: "v-red" },
       { html: fmtNum(o.falseSuspicion), cls: "v-gold" },
     ];
-    parts.push(
+    b("results").push(
       slideShell(
-        meta("s2", S2),
+        meta("s2", A2),
         "",
-        `${contentHead({ eyebrow: S2, title: `نتائج دراسة صور ${m.displayName}` })}
+        `${contentHead({ eyebrow: A2, title: `نتائج دراسة صور ${m.displayName}` })}
 <div class="v3-two-col" style="grid-template-columns:1fr 1.25fr;gap:56px">
   <div class="v3-chart-col">${chartTitleRow({ title: `${AGREEMENT} حسب نوع المنفذ` })}${chart}</div>
   <div style="${RULE}display:flex;flex-direction:column">${chartTitleRow({ title: "التفصيل حسب نوع المنفذ" })}<div style="height:560px;display:flex">${dataTable({
@@ -368,18 +379,18 @@ ${chart}
       barMaxWidth: 60,
       references: a.image.accuracy === null ? [] : [{ value: a.image.accuracy * 100, tone: "gold-dark" }],
     });
-    parts.push(
+    b("ranking").push(
       slideShell(
-        meta("s2", S2),
+        meta("s2", A2),
         "",
-        `${contentHead({ eyebrow: S2, title: `${AGREEMENT}: ${m.displayName} مقابل جميع المنافذ`, note: `المرتبة ${pos} من ${ranked.length} منفذًا` })}
+        `${contentHead({ eyebrow: A2, title: `${AGREEMENT}: ${m.displayName} مقابل جميع المنافذ`, note: `المرتبة ${pos} من ${ranked.length} منفذًا` })}
 <div class="v3-single-chart">${legendRow([{ swatch: "gold", text: m.displayName }, { dash: "gold", text: `${AGREEMENT} لجميع المنافذ ${pct(a.image.accuracy)}` }], `المنافذ التي دُرس منها ${RANKING_MIN_STUDIED} صورة فأكثر`)}${chart}</div>`,
       ),
     );
   }
 
   // 10b — Timeline: monthly نسبة التوائم for the selected port vs the other port types
-  parts.push(slideShell(meta("s2", S2), "", timelineInner(m)));
+  b("timeline").push(slideShell(meta("s2", A2), "", timelineInner(m, A2)));
 
   // 11 — Level 1 and level 2 results, one panel per scope
   {
@@ -388,8 +399,6 @@ ${chart}
         headers: ["البند", "المستوى الأول", "المستوى الثاني"],
         rows: [
           [{ html: "الحالات المدروسة" }, { html: fmtNum(sc.l1.studied), cls: "v-navy" }, { html: fmtNum(sc.l2.studied), cls: "v-navy" }],
-          [{ html: "اشتباه صحيح" }, { html: fmtNum(sc.l1.trueSuspicion), cls: "v-green" }, { html: fmtNum(sc.l2.trueSuspicion), cls: "v-green" }],
-          [{ html: "سليمة صحيحة" }, { html: fmtNum(sc.l1.trueClear), cls: "v-green" }, { html: fmtNum(sc.l2.trueClear), cls: "v-green" }],
           [{ html: "الاشتباه الفائت" }, { html: fmtNum(sc.l1.missed), cls: "v-red" }, { html: fmtNum(sc.l2.missed), cls: "v-red" }],
           [{ html: "الاشتباه الخاطئ" }, { html: fmtNum(sc.l1.falseSuspicion), cls: "v-gold" }, { html: fmtNum(sc.l2.falseSuspicion), cls: "v-gold" }],
         ],
@@ -398,11 +407,11 @@ ${chart}
         compactHeaders: true,
         rowPx: 70,
       });
-    parts.push(
+    b("levels").push(
       slideShell(
-        meta("s2", S2),
-        workload ? PRINT_DEFAULT_OFF_CLASS : "",
-        `${contentHead({ eyebrow: S2, title: "نتائج المستوى الأول والمستوى الثاني" })}
+        meta("s2", A2),
+        "", // printed like every other page, so the PDF page numbers match the footers
+        `${contentHead({ eyebrow: A2, title: "نتائج المستوى الأول والمستوى الثاني" })}
 <div class="v3-two-col">
   ${tintedPanel({ variant: variantOf(m.group), title: m.displayName, body: levelTable(s) })}
   ${tintedPanel({ variant: "all", title: "جميع المنافذ", body: levelTable(a) })}
@@ -412,12 +421,12 @@ ${chart}
   }
 
   // 12 — Section 3 divider
-  parts.push(
+  b("div3").push(
     sectionDivider({ eyebrow: footText, ghost: "03", kicker: workload ? "ملحق ج" : "القسم الثالث", title: `معدل دقة موظفي ${m.displayName}`, description: "", footItems: [], meta: meta("s3", S3) }),
   );
 
   // 13 — Accuracy tiers: three separate sections, each with its own chart and table
-  parts.push(slideShell(meta("s3", S3), "", tiersInner(m)));
+  b("tiers").push(slideShell(meta("s3", SEC3), "", tiersInner(m, SEC3)));
 
   // Staff performance vs the land and sea ports, by level. The source carries
   // employee codes only for some port types, so the comparison is made on the
@@ -437,11 +446,11 @@ ${chart}
       { html: fmtNum(g.l2.studied), cls: "v-navy" },
       { html: pct(g.l2.accuracy), cls: "v-navy" },
     ]);
-        parts.push(
+        b("staffVs").push(
       slideShell(
-        meta("s3", S3),
+        meta("s3", SEC3),
         "",
-        `${contentHead({ eyebrow: S3, title: `أداء منسوبي ${m.displayName} مقارنة بالمنافذ البرية والبحرية` })}
+        `${contentHead({ eyebrow: SEC3, title: `أداء منسوبي ${m.displayName} مقارنة بالمنافذ البرية والبحرية` })}
 ${legendRow([{ swatch: "gold", text: `${AGREEMENT} - المستوى الأول` }, { swatch: "blue", text: `${AGREEMENT} - المستوى الثاني` }])}
 ${chart}
 <div style="margin-top:22px">${dataTable({ headers: ["نوع المنفذ", "إجابات المستوى الأول", `${AGREEMENT} - الأول`, "إجابات المستوى الثاني", `${AGREEMENT} - الثاني`], rows, groupStart: 3, compactHeaders: true, rowPx: 50 })}</div>
@@ -451,7 +460,7 @@ ${chart}
   }
 
   // 14.. — Employee table, highest نسبة التوائم first
-  const employeeTables = (list: typeof staff, key: string, label: string, title: string, note: string): void => {
+  const employeeTables = (out: string[], list: typeof staff, key: string, label: string, title: string, note: string): void => {
     const pages = pagesOf(list.length);
     for (let p = 0; p < pages; p++) {
       const rows: TableCell[][] = list.slice(p * EMPLOYEE_ROWS_PER_PAGE, (p + 1) * EMPLOYEE_ROWS_PER_PAGE).map((e) => [
@@ -466,7 +475,7 @@ ${chart}
         { html: fmtNum(e.falseSuspicion), cls: "v-gold" },
         { html: pct(e.accuracy), cls: "v-green" },
       ]);
-      parts.push(
+      out.push(
         slideShell(
           meta(key, label),
           "",
@@ -492,23 +501,42 @@ ${tintedPanel({
       );
     }
   };
-  employeeTables(staff, "s3", S3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم`);
+  employeeTables(b("emp"), staff, "s3", A3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم`);
 
   // Appendix — employees below the threshold, listed so nobody silently disappears
   if (excluded.length) {
-    parts.push(sectionDivider({ eyebrow: footText, ghost: "04", kicker: workload ? "ملحق د" : "الملحقات", title: `موظفون تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لهم`, description: "", footItems: [], meta: meta("appendix", "الملحقات") }));
-    employeeTables(excluded, "appendix", "الملحقات", `ملحق: منسوبي ${m.displayName} تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لهم`, `في المستويين، تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لكل منهم (مستبعدون من مستويات الدقة)`);
+    b("div4").push(sectionDivider({ eyebrow: footText, ghost: "04", kicker: workload ? "ملحق د" : "الملحقات", title: `موظفون تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لهم`, description: "", footItems: [], meta: meta("appendix", "الملحقات") }));
+    employeeTables(b("empLow"), excluded, "appendix", workload ? `ملحق د - موظفون تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لهم` : "الملحقات", `ملحق: منسوبي ${m.displayName} تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لهم`, `في المستويين، تمت دراسة أقل من ${MIN_TIER_SAMPLE} حالة لكل منهم (مستبعدون من مستويات الدقة)`);
   }
 
   // Closing: the authority's mark and the department only.
-  parts.push(
+  b("closing").push(
     slideShell(
       { ...meta("closing", "الختام"), hideFoot: true },
       "v3-closing",
       `<div style="flex:1;display:flex;align-items:center;justify-content:center">${orgBlockHtml({ ...org, lines: [DEPARTMENT] })}</div>`,
     ),
   );
-  return parts.join("\n");
+  if (workload) {
+    b("div1w").push(sectionDivider({ eyebrow: footText, ghost: "01", kicker: "القسم الأول", title: W1, description: "", footItems: [], meta: meta("w", W1) }));
+    b("div2w").push(sectionDivider({ eyebrow: footText, ghost: "02", kicker: "القسم الثاني", title: "نتائج الدراسة", description: "", footItems: [], meta: meta("s2", S2) }));
+    b("counts").push(slideShell(meta("s2", S2), "", countsTimelineInner(m, workload)));
+    b("div3w").push(sectionDivider({ eyebrow: footText, ghost: "03", kicker: "القسم الثالث", title: "التوصيات", description: "", footItems: [], meta: meta("obs", OBS) }));
+  }
+  const wl = (key: string) => (B.wl ?? []).filter((x) => x.includes(`data-section="${key}"`));
+  // With workload data: three main sections (العبء التشغيلي، نتائج الدراسة، التوصيات), then the appendices.
+  // The year-on-year tier comparison sits in ملحق ب; «أداء المنفذ مقارنة بمستويات العبء» (w4) is left out.
+  const order: string[][] = workload
+    ? [b("cover"), b("div1w"), wl("w1"), wl("w1b"), wl("w2"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
+       b("div1"), b("pop"), b("div2"), wl("w5"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("emp"), b("div4"), b("empLow"), b("closing")]
+    : [b("cover"), b("gloss"), b("div1"), b("pop"), b("div2"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("tiers"), b("staffVs"), b("emp"), b("div4"), b("empLow"), b("closing")];
+  const html = order.flat().join("\n");
+  // Renumber: each placeholder becomes its slide's position in display order.
+  const pos = new Map<string, number>();
+  for (const mm of html.matchAll(/id="v3-slide-(9\d{5})"/g)) if (!pos.has(mm[1])) pos.set(mm[1], pos.size + 1);
+  return html
+    .replace(/id="v3-slide-(9\d{5})"/g, (_x, p: string) => `id="v3-slide-${pos.get(p) ?? p}"`)
+    .replace(/v3-page-num">(9\d{5}) \//g, (_x, p: string) => `v3-page-num">${String(pos.get(p) ?? p).padStart(2, "0")} /`);
 }
 
 const OBS = "الملاحظات والتوصيات";
@@ -551,10 +579,10 @@ const LINE_COLOR = { selected: "var(--v3-gold)", land: "var(--v3-green)", sea: "
  * newest left to right with the month number under each point and the year
  * centred under its months; one line per port type plus all ports (dashed).
  */
-function timelineInner(m: PortReportModel): string {
+function timelineInner(m: PortReportModel, eyebrow = S2): string {
   // Months where no line has enough studied images (e.g. a trailing partial month) are left off the axis.
   const months = m.monthly.filter((x) => x.selected !== null || x.all !== null);
-  const head = contentHead({ eyebrow: S2, title: `الخط الزمني لنسبة التوائم في ${m.displayName}`, note: "حسب شهر دخول الصورة" });
+  const head = contentHead({ eyebrow, title: `الخط الزمني لنسبة التوائم في ${m.displayName}`, note: "حسب شهر دخول الصورة" });
   if (months.length < 2) return `${head}<p class="v3-note">لا توجد أشهر كافية لرسم الخط الزمني.</p>`;
   const types = byTypeOrder(m.groups);
   const series = [
@@ -643,9 +671,97 @@ ${svg}`;
 
 const TIER_TONE: Record<AccuracyTier["key"], ChartTone> = { low: "red", mid: "gold", high: "green" };
 
-function tiersInner(m: PortReportModel): string {
+/**
+ * Monthly counts for the selected port, opening «نتائج الدراسة»: all shipments (images received) in the
+ * top band, and the missed and false suspicions among the studied images in the bottom band. The two
+ * bands share the RTL month axis of the نسبة التوائم timeline, each on its own zero-based scale,
+ * because shipments run in the tens of thousands and the errors in the tens.
+ */
+function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string {
+  const months = (w.monthlyCounts ?? []).filter((x) => x.images !== null);
+  const head = contentHead({ eyebrow: S2, title: `الحالات الواردة والاشتباهات الفائتة والخاطئة شهرياً`, note: m.displayName });
+  if (months.length < 2) return `${head}<p class="v3-note">لا توجد أشهر كافية لرسم الخط الزمني.</p>`;
+  const W = 1760, padL = 40, padR = 170;
+  const topT = 44, topH = 210, gap = 80, botH = 210, axisH = 120;
+  const H = topT + topH + gap + botH + axisH;
+  const botT = topT + topH + gap;
+  const x = (i: number) => W - padR - ((W - padL - padR) * i) / (months.length - 1);
+  const nice = (v: number) => { const p = 10 ** Math.floor(Math.log10(Math.max(1, v))); return Math.ceil(v / p) * p; };
+  const imgMax = nice(Math.max(1, ...months.map((x0) => x0.images ?? 0)) * 1.15);
+  const errMax = nice(Math.max(1, ...months.flatMap((x0) => [x0.missed, x0.falseSuspicion])) * 1.25);
+  const yT = (v: number) => topT + topH * (1 - v / imgMax);
+  const yB = (v: number) => botT + botH * (1 - v / errMax);
+  const grid: string[] = [];
+  for (let g = 0; g <= 4; g++) {
+    const vt = (imgMax * g) / 4, vb = (errMax * g) / 4;
+    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yT(vt).toFixed(1)}" y2="${yT(vt).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yT(vt) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vt))}</text>`);
+    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vb))}</text>`);
+  }
+  const series = [
+    { label: "الحالات الواردة", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images ?? 0), chipDy: -24 },
+    { label: "الاشتباهات الفائتة", color: "var(--v3-red)", y: yB, values: months.map((x0) => x0.missed), chipDy: -24 },
+    { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, y: yB, values: months.map((x0) => x0.falseSuspicion), chipDy: 26 },
+  ];
+  const chip = (cx: number, cy: number, text: string, color: string, wpx: number) =>
+    `<rect x="${(cx - wpx / 2).toFixed(1)}" y="${(cy - 13).toFixed(1)}" width="${wpx}" height="26" rx="5" fill="${color}"/><text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="16" font-weight="700" fill="var(--v3-bg)">${text}</text>`;
+  const lines = series
+    .map((ser, si) => {
+      const d = ser.values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${ser.y(v).toFixed(1)}`).join(" ");
+      const dots = ser.values.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${ser.y(v).toFixed(1)}" r="5" fill="${ser.color}"/>`).join("");
+      const chips = ser.values
+        .map((v, i) => {
+          // The higher of the two error counts gets its chip above its point, the lower one below,
+          // so neither chip covers the other line.
+          let dy = ser.chipDy;
+          if (si > 0) { const other = series[si === 1 ? 2 : 1].values[i]; dy = v >= other ? -24 : 26; if (v === other && si === 2) dy = 26; }
+          const t = fmtNum(v);
+          return chip(x(i), ser.y(v) + dy, t, ser.color, Math.max(40, 12 + t.length * 10));
+        })
+        .join("");
+      return `<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>${dots}${chips}`;
+    })
+    .join("");
+  const bandTitle = (y0: number, text: string) => `<text x="${W - padR - 8}" y="${y0}" text-anchor="start" font-size="22" font-weight="700" fill="var(--v3-navy)" direction="rtl">${esc(text)}</text>`;
+  const axisY = botT + botH;
+  const monthLabels = months.map((mo, i) => `<text x="${x(i).toFixed(1)}" y="${axisY + 64}" text-anchor="middle" font-size="19" fill="var(--v3-muted)">${Number(mo.monthKey.slice(5))}</text>`).join("");
+  const years: Array<{ year: string; from: number; to: number }> = [];
+  months.forEach((mo, i) => {
+    const yr = mo.monthKey.slice(0, 4);
+    const last = years[years.length - 1];
+    if (last && last.year === yr) last.to = i;
+    else years.push({ year: yr, from: i, to: i });
+  });
+  const yearLabels = years
+    .map((yr, k) => {
+      const mid = (x(yr.from) + x(yr.to)) / 2;
+      const sx = k > 0 ? ((x(yr.from - 1) + x(yr.from)) / 2).toFixed(1) : "";
+      const sep = k > 0 ? `<line x1="${sx}" x2="${sx}" y1="${topT - 20}" y2="${H - 10}" stroke="var(--v3-navy)" stroke-width="2"/>` : "";
+      return `${sep}<text x="${mid.toFixed(1)}" y="${H - 18}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--v3-navy)">${yr.year}</text>`;
+    })
+    .join("");
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="الخط الزمني للحالات الواردة (إرساليات) والاشتباهات" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, "الحالات الواردة (جميع الصور)")}${bandTitle(botT - 14, "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)")}${lines}${monthLabels}</svg>`;
+  const total = (vals: number[]) => vals.reduce((a0, b0) => a0 + b0, 0);
+  const legend = series
+    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">الإجمالي ${fmtNum(total(ser.values))} · المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / months.length))}</span></div>`)
+    .join("");
+  // Source caveats, detected from the figures: months before any missed suspicion was recorded, and
+  // months whose received images are under half the median month (an incomplete population sheet).
+  const mLabel = (k: string) => `${Number(k.slice(5))}/${k.slice(0, 4)}`;
+  const notes: string[] = [];
+  const firstMissed = months.findIndex((x0) => x0.missed > 0);
+  if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${mLabel(months[firstMissed].monthKey)}.`);
+  const sortedImg = months.map((x0) => x0.images ?? 0).sort((a0, b0) => a0 - b0);
+  const median = sortedImg[Math.floor(sortedImg.length / 2)];
+  const thin = months.filter((x0) => (x0.images ?? 0) < median / 2).map((x0) => mLabel(x0.monthKey));
+  if (thin.length) notes.push(`الحالات الواردة في ${thin.join("، ")} أقل من نصف الشهر المعتاد في ملف المجتمع، ويُرجّح أن بيانات تلك الأشهر غير مكتملة في المصدر.`);
+  return `${head}
+<div style="display:flex;flex-wrap:wrap;gap:10px 48px;margin-bottom:10px">${legend}</div>
+${svg}${notes.length ? `<p class="v3-note" style="margin:6px 0 0;font-size:18px">${notes.map(esc).join(" ")}</p>` : ""}`;
+}
+
+function tiersInner(m: PortReportModel, eyebrow = S3): string {
   const d = m.distribution;
-  const head = contentHead({ eyebrow: S3, title: `معدل التوافق لمنسوبي ${m.displayName}`, note: `المتوسط ${pct(d.mean)} · الوسيط ${pct(d.median)}` });
+  const head = contentHead({ eyebrow, title: `معدل التوافق لمنسوبي ${m.displayName}`, note: `المتوسط ${pct(d.mean)} · الوسيط ${pct(d.median)}` });
   if (d.tiers.length === 0) return `${head}<p class="v3-note">لا يوجد موظفون بعدد حالات مدروسة كافٍ (${MIN_TIER_SAMPLE} فأكثر).</p>`;
   const sections = d.tiers
     .map((t, i) => {
@@ -696,7 +812,7 @@ export function buildPortReportHtml(m: PortReportModel, workload?: WorkloadSlide
     ".slide.v3 .pr-apx td{height:auto;min-height:28px;overflow:visible;font-size:18px;}.slide.v3 .pr-apx td:first-child{font-size:17px;overflow:visible;}" +
     ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}" +
     // Observations: one size for the main observation, the evidence and the recommendations, on every page.
-    ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:26px;line-height:1.55;}" +
+    ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:24px;line-height:1.55;}" +
     ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}";
   // Long dashes out, including the viewer script's escaped ones ("\u2014" in its page counter).
   return html.replace("</style>", `${centre}</style>`).replace(/[\u2013\u2014]/g, "-").replace(/\\u201[34]/g, "-");

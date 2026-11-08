@@ -3,7 +3,7 @@ import { createWorkloadAggregator, dayOf, isWorkloadSheet, orderWorkloadSheets }
 
 describe("workloadAggregate", () => {
   it("recognises and orders the population sheets", () => {
-    expect(["2024", "2025-Q1", "Q4B", "نتائج الدراسة"].filter(isWorkloadSheet)).toEqual(["2024", "2025-Q1", "Q4B"]);
+    expect(["2024", "2025-Q1", "Q4B", "نتائج الدراسة"].filter(isWorkloadSheet)).toEqual(["2025-Q1", "Q4B"]);
     expect(orderWorkloadSheets(["Q4B", "2025-Q2", "2024", "2025-Q1"], (s) => s)).toEqual(["2024", "2025-Q1", "2025-Q2", "Q4B"]);
   });
 

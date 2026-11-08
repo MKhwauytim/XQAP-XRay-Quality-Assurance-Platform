@@ -59,7 +59,8 @@ export async function readWorkload(workbookPath, createAggregator) {
     copyFileSync(workbookPath, src);
     const winTar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
     execFileSync(existsSync(winTar) ? winTar : "tar", ["-xf", src, "-C", dir, "xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/sharedStrings.xml", "xl/worksheets"]);
-    const sheets = sheetFiles(dir).filter(([n]) => /^(\d{4}(-Q\d)?|Q\dB)$/.test(n));
+    // 2024 is not part of the report: same rule as workloadAggregate.isWorkloadSheet.
+    const sheets = sheetFiles(dir).filter(([n]) => /^(\d{4}(-Q\d)?|Q\dB)$/.test(n) && !(/^\d{4}/.test(n) && n.slice(0, 4) < "2025"));
     if (!sheets.length) return null;
     // Oldest first, Q4B last, so a duplicate keeps the row from its own period sheet.
     sheets.sort((a, b) => (a[0].startsWith("Q") ? 1 : 0) - (b[0].startsWith("Q") ? 1 : 0) || a[0].localeCompare(b[0]));
