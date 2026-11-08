@@ -151,7 +151,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;border-top:4px solid var(--v3-${TONE[t.key]});margin-bottom:14px">
     ${stat(L.images, num(a.images))}${stat(L.imagesMonth, num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat("متوسط الموظفين في الشهر للمنفذ", num(meanOf(t.ports.map((p) => p.employeesPerMonth))))}
   </div>
-  ${dataTable({ headers: ["النوع", "المنفذ", L.images, L.imagesMonth, L.staffMonth, "حالات الموظف في الشهر"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-wrap pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:33%"/><col style="width:17%"/><col style="width:14%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
+  ${dataTable({ headers: ["النوع", "المنفذ", L.images, L.imagesMonth, L.staffMonth, "حالات الموظف في الشهر"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-wrap pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:30%"/><col style="width:20%"/><col style="width:14%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
 </div>`;
       })
       .join("");
