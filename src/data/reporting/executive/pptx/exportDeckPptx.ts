@@ -37,11 +37,16 @@ async function withLaidOutDeck<T>(html: string, read: (doc: Document) => Promise
   }
 }
 
-/** Builds the PowerPoint file for a finished deck3 HTML string and downloads it as `fileName`. */
-export async function downloadDeckAsPptx(html: string, fileName: string, title: string): Promise<{ slides: number }> {
+/** The PowerPoint file for a finished deck3 HTML string. */
+export async function deckHtmlToPptx(html: string, title: string): Promise<{ blob: Blob; slides: number }> {
   const slides = await withLaidOutDeck(html, readDeckGeometry);
   if (!slides.length) throw new Error("deck has no slides");
-  const blob = await deckToPptx(slides, title);
+  return { blob: await deckToPptx(slides, title), slides: slides.length };
+}
+
+/** Builds the PowerPoint file for a finished deck3 HTML string and downloads it as `fileName`. */
+export async function downloadDeckAsPptx(html: string, fileName: string, title: string): Promise<{ slides: number }> {
+  const { blob, slides } = await deckHtmlToPptx(html, title);
   downloadBlob(blob, fileName);
-  return { slides: slides.length };
+  return { slides };
 }
