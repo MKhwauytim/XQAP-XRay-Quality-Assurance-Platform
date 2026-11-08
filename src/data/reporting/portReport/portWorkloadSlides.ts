@@ -14,7 +14,7 @@ import type { ChartTone } from "../executive/deck3/chartKit";
 import { esc, fmtNum } from "../executive/primitives";
 import type { OutcomeStats } from "./portReportModel";
 import type { LevelOutcomes, PortWorkload, WorkloadTier, WorkloadTierKey } from "./portWorkloadModel";
-import { MIN_MONTHLY_EXAMS } from "./portWorkloadModel";
+import { POOL_SHARE } from "./portWorkloadModel";
 
 export type WorkloadSlideInput = {
   displayName: string;
@@ -30,6 +30,10 @@ export type WorkloadSlideInput = {
   periodLabel: string;
   /** Ports with no employee data, left out of the tiers. */
   unrated: PortWorkload[];
+  /** The same ports tiered by images received per month instead of the workload per employee (thirds). */
+  imageTiers?: WorkloadTier[];
+  /** Ports grouped by نسبة التوائم (thirds, selected port excluded), for the level-results slide. */
+  accuracyGroups?: Array<{ key: WorkloadTierKey; label: string; ports: string[]; from: number | null; to: number | null; outcomes: LevelOutcomes }>;
   /** Per month for the selected port: images received (all shipments), and the studied images that were a missed or a false suspicion. */
   monthlyCounts?: Array<{ monthKey: string; images: number | null; missed: number; falseSuspicion: number }>;
 };
@@ -129,38 +133,41 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   const tierName = (t: WorkloadTier) => `المستوى ${t.label}`;
   const others = (t: WorkloadTier) => t.ports.filter((p) => p.port !== w.port);
 
-  // 1 — Workload tiers: each tier's totals, then its ports.
-  {
+  // 1 — Workload tiers: each tier's totals, then its ports. 1b — the same page on the images-per-month tiers.
+  const tierPage = (tiers: WorkloadTier[], key: string, title: string, note: string, prefix: string) => {
     const stat = (label: string, value: string) =>
-      `<div style="padding:6px 0;border-bottom:1px solid var(--v3-hair)"><div style="font-size:19px;color:var(--v3-muted)">${esc(label)}</div><div style="font-size:36px;font-weight:700;color:var(--v3-navy);line-height:1.15">${esc(value)}</div></div>`;
-    const padRows = Math.max(...w.tiers.map((x) => x.ports.length));
-    const cols = w.tiers
+      `<div style="padding:6px 0;border-bottom:1px solid var(--v3-hair)"><div style="font-size:18px;color:var(--v3-muted);white-space:nowrap">${esc(label)}</div><div style="font-size:36px;font-weight:700;color:var(--v3-navy);line-height:1.15">${esc(value)}</div></div>`;
+    const padRows = Math.max(...tiers.map((x) => x.ports.length));
+    const cols = tiers
       .map((t, i) => {
         const rows: TableCell[][] = t.ports.map((p) => {
           const hl = p.port === w.port;
           const cell = (html: string, cls = "v-navy"): TableCell => ({ html: hl ? `<b>${html}</b>` : html, cls: hl ? "v-gold" : cls });
-          return [cell(esc(typeShort(p.type)), "v-muted"), cell(esc(hl ? w.displayName : p.port), ""), cell(fmtNum(p.images)), cell(num(p.imagesPerMonth)), cell(num(p.employeesPerMonth))];
+          return [cell(esc(typeShort(p.type)), "v-muted"), cell(esc(hl ? w.displayName : p.port), ""), cell(fmtNum(p.images)), cell(num(p.imagesPerMonth)), cell(num(p.employeesPerMonth)), cell(num(p.perEmployeeMonth))];
         });
         const a = groupTotals(t.ports);
         return `<div style="display:flex;flex-direction:column;min-width:0;${i > 0 ? RULE : ""}">
-  ${chartTitleRow({ title: `عبء ${t.label}` })}
+  ${chartTitleRow({ title: `${prefix} ${t.label}` })}
   <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;border-top:4px solid var(--v3-${TONE[t.key]});margin-bottom:14px">
-    ${stat(L.images, num(a.images))}${stat(L.imagesMonth, num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat(L.staffMonth, num(a.staffPerMonth))}
+    ${stat(L.images, num(a.images))}${stat(L.imagesMonth, num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat("متوسط الموظفين في الشهر للمنفذ", num(meanOf(t.ports.map((p) => p.employeesPerMonth))))}
   </div>
-  ${dataTable({ headers: ["النوع", "المنفذ", L.images, L.imagesMonth, L.staffMonth], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-wrap pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:9%"/><col style="width:37%"/><col style="width:20%"/><col style="width:17%"/><col style="width:17%"/></colgroup><thead>')}
+  ${dataTable({ headers: ["النوع", "المنفذ", L.images, L.imagesMonth, L.staffMonth, "حالات الموظف في الشهر"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-wrap pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:33%"/><col style="width:17%"/><col style="width:14%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
 </div>`;
       })
       .join("");
     parts.push(
       slideShell(
-        meta("w1", SEC),
+        meta(key, SEC),
         "",
-        `${contentHead({ eyebrow: EYEBROW.w1, title: "تأثير عبء العمل على النتائج" })}
+        `${contentHead({ eyebrow: EYEBROW.w1, title })}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:22px">${cols}</div>
-<p class="v3-note" style="margin-top:10px;font-size:19px"><b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ، ويُحسب لكل نوع منفذ (بري، بحري) على حدة: المنخفض أقل من نصف متوسط النوع، والعالي أكثر من مرة ونصف، والمتوسط بينهما. الموظف المخصص للمنفذ من فحص فيه ${MIN_MONTHLY_EXAMS} حالة على الأقل في الشهر. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.</p>`,
+<p class="v3-note" style="margin-top:10px;font-size:19px">${note}</p>`,
       ),
     );
-  }
+  };
+  const staffNote = `الموظفون: كل من فحص حالة واحدة على الأقل في المنفذ، ومتوسطهم عددهم في كل شهر. متوسط حالات الموظف: الموظفون الذين فحصوا أقل من ${Math.round(POOL_SHARE * 100)}% من متوسط الشهر تُجمع حالاتهم وتُحسب موظفين مكافئين. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.`;
+  tierPage(w.tiers, "w1", "تأثير عبء العمل على النتائج", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء");
+  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير حجم الصور على النتائج", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم");
 
   // 2 — Workforce distribution: images, staff and each employee's output per tier.
   {
@@ -218,8 +225,6 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
         headers: ["البند", "المستوى الأول", "المستوى الثاني"],
         rows: [
           [{ html: "المدروسة" }, { html: fmtNum(o.l1.studied), cls: "v-navy" }, { html: fmtNum(o.l2.studied), cls: "v-navy" }],
-          [{ html: "اشتباه صحيح" }, { html: withShare(o.l1.trueSuspicion, o.l1.studied), cls: "v-green" }, { html: withShare(o.l2.trueSuspicion, o.l2.studied), cls: "v-green" }],
-          [{ html: "سليمة صحيحة" }, { html: withShare(o.l1.trueClear, o.l1.studied), cls: "v-green" }, { html: withShare(o.l2.trueClear, o.l2.studied), cls: "v-green" }],
           [{ html: "الاشتباه الفائت" }, { html: withShare(o.l1.missed, o.l1.studied), cls: "v-red" }, { html: withShare(o.l2.missed, o.l2.studied), cls: "v-red" }],
           [{ html: "الاشتباه الخاطئ" }, { html: withShare(o.l1.falseSuspicion, o.l1.studied), cls: "v-gold" }, { html: withShare(o.l2.falseSuspicion, o.l2.studied), cls: "v-gold" }],
         ],
@@ -228,16 +233,18 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
         compactHeaders: true,
         rowPx: 72,
       }).replace('<table class="v3-table', '<table class="pr-lv v3-table').replace("<thead>", '<colgroup><col style="width:40%"/><col/><col/></colgroup><thead>');
+    // Ports grouped by their own نسبة التوائم (thirds), compared with the selected port.
+    const groups = w.accuracyGroups ?? [];
     const panels = [
-      ...w.tiers.map((t) => ({ title: tierName(t), o: w.outcomes[t.key], variant: "all" as const })),
-      { title: w.displayName, o: w.outcomes.selected, variant: "land" as const },
+      ...groups.map((g) => ({ title: `دقة ${g.label}`, note: `${pct(g.from, 0)} - ${pct(g.to, 0)}` as string | undefined, o: g.outcomes, variant: "all" as const })),
+      { title: w.displayName, note: pct(w.outcomes.selected.image.accuracy, 0) as string | undefined, o: w.outcomes.selected, variant: "land" as const },
     ];
     parts.push(
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: EYEBROW.w3, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى العبء التشغيلي" })}
-<div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, body: levelTable(p.o) })).join("")}</div>`,
+        `${contentHead({ eyebrow: EYEBROW.w3, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى الدقة", note: `المنافذ (دون ${esc(w.displayName)}) مرتبة حسب ${"نسبة التوائم"} ومقسومة ثلاثة أثلاث` })}
+<div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, note: p.note, body: levelTable(p.o) })).join("")}</div>`,
       ),
     );
   }

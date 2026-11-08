@@ -47,11 +47,28 @@ function employeeTotals(months: readonly WorkloadMonthInput[]): EmployeeTotals {
   return t;
 }
 
-/** Employees with fewer examinations than this over the whole period are left out of every workload figure. */
-export const MIN_EMPLOYEE_EXAMS = 30;
+/**
+ * An employee whose cases in a port-month are below this share of that month's average is
+ * «far below the average»: those employees are pooled (see pooledMean).
+ */
+export const POOL_SHARE = 0.1;
 
-/** An employee is part of a port's staff in a month only with at least this many of its images that month. */
-export const MIN_MONTHLY_EXAMS = 30;
+/**
+ * Average cases per employee with the far-below employees pooled. The average over everyone
+ * is taken first; employees under POOL_SHARE of it are set aside; the rest give the real
+ * average, and the set-aside cases count as (their cases ÷ that average) equivalent employees.
+ * Example: 50 employees with 400 cases each and 100 with 2 each → the plain average is 135, the
+ * pooled one 400 (the 200 small cases are half an employee).
+ */
+export function pooledMean(counts: readonly number[]): { mean: number | null; core: number; equivalent: number } {
+  const v = counts.filter((n) => n > 0);
+  if (!v.length) return { mean: null, core: 0, equivalent: 0 };
+  const plain = v.reduce((a, b) => a + b, 0) / v.length;
+  const core = v.filter((n) => n >= plain * POOL_SHARE);
+  const coreMean = core.reduce((a, b) => a + b, 0) / core.length;
+  const small = v.filter((n) => n < plain * POOL_SHARE).reduce((a, b) => a + b, 0);
+  return { mean: coreMean, core: core.length, equivalent: core.length + small / coreMean };
+}
 
 /**
  * The workload is measured on this year only. 2024 carries no employee codes,
@@ -123,31 +140,26 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
     return { employees: null, employeesPerMonth: null, perEmployeeMonth: null, perEmployeeDay: null, l1Employees: null, l2Employees: null, l1PerDay: null, l2PerDay: null, l1PerMonth: null, l2PerMonth: null };
   }
   void totals;
-  // Assigned staff (owner's rule, 2026-11-04): in a month, an employee belongs to a port only
-  // when they examined at least MIN_MONTHLY_EXAMS of its images that month — the people who
-  // work the port, not someone who passed through for a handful of images.
-  const assigned = (m: WorkloadMonthInput) => {
+  // Staff (owner's rule, 2026-11-08): every employee who examined at least one of the port's
+  // images in the month counts in its headcount. The cases per employee are pooledMean(): the
+  // employees far below the month's average (a handful of cases) are combined into equivalent
+  // employees instead of each counting as one, which would drag the average down.
+  const perMonth = ok.map((m) => {
     const all = new Map<string, number>();
     for (const rec of [m.l1, m.l2]) for (const [c, n] of Object.entries(rec)) all.set(c, (all.get(c) ?? 0) + n);
-    return new Set([...all].filter(([, n]) => n >= MIN_MONTHLY_EXAMS).map(([c]) => c));
-  };
-  const perMonth = ok.map((m) => {
-    const staff = assigned(m);
-    const examsOf = (rec: Readonly<Record<string, number>>) => Object.entries(rec).filter(([c]) => staff.has(c)).reduce((a, [, n]) => a + n, 0);
-    const levelStaff = (rec: Readonly<Record<string, number>>) => Object.keys(rec).filter((c) => staff.has(c)).length;
-    const e1 = examsOf(m.l1), e2 = examsOf(m.l2);
-    const s1 = levelStaff(m.l1), s2 = levelStaff(m.l2);
+    const p = pooledMean([...all.values()]);
+    const p1 = pooledMean(Object.values(m.l1));
+    const p2 = pooledMean(Object.values(m.l2));
     const days = Math.max(1, m.days.length);
     return {
-      staff,
-      fte: staff.size,
-      fte1: s1,
-      fte2: s2,
-      perEmp: staff.size > 0 ? (e1 + e2) / staff.size : null,
-      l1Month: s1 > 0 ? e1 / s1 : null,
-      l2Month: s2 > 0 ? e2 / s2 : null,
-      l1Day: s1 > 0 ? e1 / s1 / days : null,
-      l2Day: s2 > 0 ? e2 / s2 / days : null,
+      fte: all.size,
+      fte1: Object.keys(m.l1).length,
+      fte2: Object.keys(m.l2).length,
+      perEmp: p.mean,
+      l1Month: p1.mean,
+      l2Month: p2.mean,
+      l1Day: p1.mean === null ? null : p1.mean / days,
+      l2Day: p2.mean === null ? null : p2.mean / days,
       days,
     };
   });
@@ -173,11 +185,9 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
 
 /** Group monthly rows into one PortWorkload per (already canonical) port name. */
 export function buildPortWorkloads(input: readonly WorkloadMonthInput[]): PortWorkload[] {
-  // Drop employees with fewer than MIN_EMPLOYEE_EXAMS examinations in the whole period.
-  const grand = new Map<string, number>();
-  for (const m of input) for (const rec of [m.l1, m.l2]) for (const [c, n] of Object.entries(rec)) grand.set(c, (grand.get(c) ?? 0) + n);
-  const keep = (rec: Readonly<Record<string, number>>) => Object.fromEntries(Object.entries(rec).filter(([c]) => (grand.get(c) ?? 0) >= MIN_EMPLOYEE_EXAMS));
-  const months = input.map((m) => ({ ...m, l1: keep(m.l1), l2: keep(m.l2) }));
+  // Every employee counts, even with one case (owner's rule, 2026-11-08); low-volume
+  // employees are handled by pooledMean in each month instead of being dropped.
+  const months = input;
   const totals = employeeTotals(months);
   const byPort = new Map<string, WorkloadMonthInput[]>();
   for (const m of months) {
@@ -211,59 +221,60 @@ export function buildPortWorkloads(input: readonly WorkloadMonthInput[]): PortWo
   });
 }
 
-/**
- * How far from the all-ports average a port may sit and still be «متوسط»:
- * 0.5 → from half the average to one and a half times it.
- */
-export const AVERAGE_BAND = 0.5;
-
-/**
- * Three tiers around the average workload per employee (owner's rule,
- * 2026-11-04): about the average = medium, below it = low, above it = high.
- * «About» is ± AVERAGE_BAND of the average. The workload measure is images per
- * employee per month, which combines the port's images, its employees and
- * their monthly output; ports with no employee data are left out (see
- * unratedPorts).
- */
-/** A port needs at least this many employees a month (on average) to be tiered: below it, a few images over a fraction of one employee give a meaningless load. */
+/** A port needs at least this many employees a month (on average) to be tiered. */
 export const MIN_STAFF_PER_MONTH = 1;
 
+/**
+ * A port is tiered only when it received at least this many images a day on average in the
+ * load year (×30 a month). Below it a port sees a handful of images, spread over reviewers who
+ * mostly work elsewhere, and its cases per employee mean nothing; it is listed as unrated.
+ */
+export const MIN_PORT_IMAGES_PER_DAY = 10;
+
+/** Images a month in the load year (the year the staff and workload are measured on). */
+export const loadImagesPerMonth = (p: PortWorkload): number | null => {
+  const y = p.years.find((x) => String(x.year) === LOAD_YEAR);
+  return y ? y.images / Math.max(1, y.months) : null;
+};
+
+/** The workload measure (cases per employee per month), or null for a port left out of the tiers. */
 export const workloadMeasure = (p: PortWorkload): number | null =>
-  p.employeesPerMonth !== null && p.employeesPerMonth >= MIN_STAFF_PER_MONTH ? p.perEmployeeMonth : null;
+  p.employeesPerMonth !== null && p.employeesPerMonth >= MIN_STAFF_PER_MONTH && (loadImagesPerMonth(p) ?? 0) >= MIN_PORT_IMAGES_PER_DAY * 30 ? p.perEmployeeMonth : null;
 
 export function unratedPorts(ports: readonly PortWorkload[]): PortWorkload[] {
   return ports.filter((p) => workloadMeasure(p) === null);
 }
 
-export function buildWorkloadTiers(all: readonly PortWorkload[]): WorkloadTier[] {
-  const ports = all.filter((p) => workloadMeasure(p) !== null);
+/** Key of the single band set in WorkloadTier.ranges / averages: the tiers no longer split land and sea ports. */
+export const ALL_PORTS_KEY = "جميع المنافذ";
+
+/**
+ * Three tiers of equal size (owner's rule, 2026-11-08): the ports, land and sea together, are
+ * ranked by the measure and cut into thirds, so a «منخفض» port is never above a «متوسط» one.
+ * `measure` defaults to the workload per employee; the images-per-month tiering passes its own.
+ */
+export function buildWorkloadTiers(all: readonly PortWorkload[], measureOf: (p: PortWorkload) => number | null = workloadMeasure): WorkloadTier[] {
+  const ports = all.filter((p) => measureOf(p) !== null);
   if (!ports.length) return [];
-  const measure = (p: PortWorkload) => workloadMeasure(p) as number;
-  // Each port type (land / sea) is tiered against its own average, then the tiers are merged.
-  const types = [...new Set(ports.map((p) => p.type))];
-  const bandOf = new Map<string, { lo: number; hi: number; avg: number }>();
-  for (const t of types) {
-    const v = ports.filter((p) => p.type === t).map(measure);
-    const avg = v.reduce((a, b) => a + b, 0) / v.length;
-    bandOf.set(t, { avg, lo: avg * (1 - AVERAGE_BAND), hi: avg * (1 + AVERAGE_BAND) });
-  }
+  const measure = (p: PortWorkload) => measureOf(p) as number;
+  const sorted = [...ports].sort((a, b) => measure(a) - measure(b) || a.port.localeCompare(b.port));
+  const n = sorted.length;
+  const cuts = [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+  const avgAll = sorted.reduce((a, p) => a + measure(p), 0) / n;
   const keys: WorkloadTierKey[] = ["low", "mid", "high"];
-  const tierIdx = (p: PortWorkload) => { const b = bandOf.get(p.type)!; const v = measure(p); return v < b.lo ? 0 : v > b.hi ? 2 : 1; };
-  const idx = (_v: number) => 0;
-  void idx;
-  const bounds: Array<[number, number]> = [[0, 0], [0, 0], [0, 0]];
   return keys.map((key, i) => {
-    const tp = ports.filter((p) => tierIdx(p) === i).sort((a, b) => a.type.localeCompare(b.type) || measure(b) - measure(a));
-    const ranges = Object.fromEntries(types.map((t) => { const b = bandOf.get(t)!; return [t, i === 0 ? [0, b.lo] : i === 1 ? [b.lo, b.hi] : [b.hi, Infinity]]; })) as Record<string, [number, number]>;
+    const tp = sorted.slice(cuts[i], cuts[i + 1]).sort((a, b) => measure(b) - measure(a));
+    const lo = tp.length ? measure(tp[tp.length - 1]) : 0;
+    const hi = tp.length ? measure(tp[0]) : 0;
     const f = (g: (p: PortWorkload) => number | null) => mean(tp.map(g));
     return {
       key,
       label: TIER_LABELS[key],
-      from: bounds[i][0],
-      to: bounds[i][1],
+      from: lo,
+      to: hi,
       ports: tp,
-      ranges,
-      averages: Object.fromEntries(types.map((t) => [t, bandOf.get(t)!.avg])) as Record<string, number>,
+      ranges: { [ALL_PORTS_KEY]: [lo, hi] } as Record<string, [number, number]>,
+      averages: { [ALL_PORTS_KEY]: avgAll } as Record<string, number>,
       avg: {
         images: f((p) => p.images) ?? 0,
         imagesPerMonth: f((p) => p.imagesPerMonth) ?? 0,

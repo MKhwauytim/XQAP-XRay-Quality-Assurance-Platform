@@ -120,9 +120,11 @@ export function buildPortObservations(m: PortReportModel, w?: WorkloadSlideInput
         const grown = RATES.map((r) => ({ r, from: share(a.selected.image[r.key], a.selected.image.studied) ?? 0, to: share(b.selected.image[r.key], b.selected.image.studied) ?? 0 }))
           .map((x) => ({ ...x, d: x.to - x.from }))
           .sort((x, y) => y.d - x.d)[0];
-        const tierFacts = tiers
+        // The three tiers in one line, so the evidence panel does not overflow.
+        const tierParts = tiers
           .filter((t) => (a.tiers[t.key]?.image.studied ?? 0) > 0 && (b.tiers[t.key]?.image.studied ?? 0) > 0)
-          .map((t) => `بلغت نسبة التوائم في ${tierName(t.label)} ${pct(a.tiers[t.key]!.image.accuracy)} في ${a.year} و${pct(b.tiers[t.key]!.image.accuracy)} في ${b.year}.`);
+          .map((t) => `${t.label} ${pct(a.tiers[t.key]!.image.accuracy)} ثم ${pct(b.tiers[t.key]!.image.accuracy)}`);
+        const tierFacts = tierParts.length ? [`نسبة التوائم في مستويات العبء (${a.year} ثم ${b.year}): ${tierParts.join("، ")}.`] : [];
         out.push({
           key: "decline",
           priority: "عالية",
@@ -179,9 +181,9 @@ export function buildPortObservations(m: PortReportModel, w?: WorkloadSlideInput
     const low = w.tiers.find((t) => t.key === "low");
     const lowOutcome = tierOutcome("low").image;
     if (selPort && selTier?.key === "high" && low && lowOutcome.accuracy !== null && (sel.image.accuracy ?? 1) < lowOutcome.accuracy && selPort.perEmployeeMonth !== null) {
-      const typeAvg = selTier.averages[selPort.type];
-      // «منفذ بحري» → «المنافذ البحرية»: the port type the workload bands are built on.
-      const typeName = `المنافذ ال${selPort.type.replace("منفذ ", "")}ة`;
+      // The tiers are built on all ports together (land and sea), so the comparison is all ports.
+      const typeAvg = Object.values(selTier.averages)[0];
+      const typeName = "جميع المنافذ";
       out.push({
         key: "workload",
         priority: "متوسطة",

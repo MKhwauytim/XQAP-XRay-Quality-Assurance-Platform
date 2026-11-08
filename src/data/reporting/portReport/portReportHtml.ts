@@ -28,7 +28,6 @@ import { esc, fmtNum } from "../executive/primitives";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../branding/organization";
 import type { AccuracyTier, OutcomeStats, PortReportModel, ScopeSummary } from "./portReportModel";
 import { MIN_TIER_SAMPLE } from "./portReportModel";
-import { PRINT_DEFAULT_OFF_CLASS } from "../executive/printSelection";
 import { workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
 import { buildPortObservations } from "./portObservations";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
@@ -192,10 +191,11 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
             dotTone: "blue",
             title: "العبء والقوة العاملة",
             terms: [
-              { term: "الموظف المخصص للمنفذ", definition: "من فحص 30 حالة على الأقل من صور المنفذ في الشهر. إجمالي الموظفين المخصصين: كل من فحص حالات في المنفذ، دون تكرار؛ ومتوسط عدد الموظفين في الشهر: متوسط عددهم شهراً بشهر." },
-              { term: "متوسط عدد الحالات المفحوصة للموظف الواحد", definition: "حالات الموظفين المخصصين للمنفذ في الشهر (المستوى الأول والثاني) ÷ عددهم. الصور بلا كود موظف لا تدخل في الحساب." },
+              { term: "الموظف المخصص للمنفذ", definition: "كل من فحص حالة واحدة على الأقل في المنفذ. الإجمالي: عددهم دون تكرار؛ والمتوسط: عددهم في كل شهر." },
+              { term: "متوسط عدد الحالات المفحوصة للموظف الواحد", definition: "حالات المنفذ في الشهر ÷ موظفيه، مع جمع حالات من فحص أقل من عُشر المتوسط واحتسابهم موظفين مكافئين." },
               { term: "متوسط الحالات للموظف في الشهر حسب المستوى", definition: "حالات المستوى الأول ÷ موظفي المستوى الأول المخصصين في الشهر، وكذلك المستوى الثاني، بنفس قاعدة الموظف المخصص." },
-              { term: "مستوى العبء التشغيلي", definition: "لكل نوع منفذ (بري، بحري) على حدة: منخفض أقل من نصف متوسط النوع، وعالي أكثر من مرة ونصف، ومتوسط بينهما." },
+              { term: "مستوى العبء التشغيلي", definition: "المنافذ البرية والبحرية معاً مرتبة حسب حالات الموظف (أو الصور في الشهر) ومقسومة ثلاثة أثلاث متساوية: منخفض ومتوسط وعالي." },
+              { term: "مستوى الدقة", definition: "المنافذ التي دُرس منها 30 صورة فأكثر، مرتبة حسب نسبة التوائم ومقسومة ثلاثة أثلاث." },
             ],
           },
         ],
@@ -399,8 +399,6 @@ ${chart}
         headers: ["البند", "المستوى الأول", "المستوى الثاني"],
         rows: [
           [{ html: "الحالات المدروسة" }, { html: fmtNum(sc.l1.studied), cls: "v-navy" }, { html: fmtNum(sc.l2.studied), cls: "v-navy" }],
-          [{ html: "اشتباه صحيح" }, { html: fmtNum(sc.l1.trueSuspicion), cls: "v-green" }, { html: fmtNum(sc.l2.trueSuspicion), cls: "v-green" }],
-          [{ html: "سليمة صحيحة" }, { html: fmtNum(sc.l1.trueClear), cls: "v-green" }, { html: fmtNum(sc.l2.trueClear), cls: "v-green" }],
           [{ html: "الاشتباه الفائت" }, { html: fmtNum(sc.l1.missed), cls: "v-red" }, { html: fmtNum(sc.l2.missed), cls: "v-red" }],
           [{ html: "الاشتباه الخاطئ" }, { html: fmtNum(sc.l1.falseSuspicion), cls: "v-gold" }, { html: fmtNum(sc.l2.falseSuspicion), cls: "v-gold" }],
         ],
@@ -412,7 +410,7 @@ ${chart}
     b("levels").push(
       slideShell(
         meta("s2", A2),
-        workload ? PRINT_DEFAULT_OFF_CLASS : "",
+        "", // printed like every other page, so the PDF page numbers match the footers
         `${contentHead({ eyebrow: A2, title: "نتائج المستوى الأول والمستوى الثاني" })}
 <div class="v3-two-col">
   ${tintedPanel({ variant: variantOf(m.group), title: m.displayName, body: levelTable(s) })}
@@ -529,7 +527,7 @@ ${tintedPanel({
   // With workload data: three main sections (العبء التشغيلي، نتائج الدراسة، التوصيات), then the appendices.
   // The year-on-year tier comparison sits in ملحق ب; «أداء المنفذ مقارنة بمستويات العبء» (w4) is left out.
   const order: string[][] = workload
-    ? [b("cover"), b("div1w"), wl("w1"), wl("w2"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
+    ? [b("cover"), b("div1w"), wl("w1"), wl("w1b"), wl("w2"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
        b("div1"), b("pop"), b("div2"), wl("w5"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("emp"), b("div4"), b("empLow"), b("closing")]
     : [b("cover"), b("gloss"), b("div1"), b("pop"), b("div2"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("tiers"), b("staffVs"), b("emp"), b("div4"), b("empLow"), b("closing")];
   const html = order.flat().join("\n");
@@ -681,7 +679,7 @@ const TIER_TONE: Record<AccuracyTier["key"], ChartTone> = { low: "red", mid: "go
  */
 function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string {
   const months = (w.monthlyCounts ?? []).filter((x) => x.images !== null);
-  const head = contentHead({ eyebrow: S2, title: `الإرساليات والاشتباهات في ${m.displayName}`, note: "الاشتباهات الفائتة والخاطئة حسب الشهر" });
+  const head = contentHead({ eyebrow: S2, title: `الحالات الواردة والاشتباهات الفائتة والخاطئة شهرياً`, note: m.displayName });
   if (months.length < 2) return `${head}<p class="v3-note">لا توجد أشهر كافية لرسم الخط الزمني.</p>`;
   const W = 1760, padL = 40, padR = 170;
   const topT = 44, topH = 210, gap = 80, botH = 210, axisH = 120;
@@ -700,7 +698,7 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
     grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vb))}</text>`);
   }
   const series = [
-    { label: "عدد الإرساليات", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images ?? 0), chipDy: -24 },
+    { label: "الحالات الواردة", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images ?? 0), chipDy: -24 },
     { label: "الاشتباهات الفائتة", color: "var(--v3-red)", y: yB, values: months.map((x0) => x0.missed), chipDy: -24 },
     { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, y: yB, values: months.map((x0) => x0.falseSuspicion), chipDy: 26 },
   ];
@@ -741,14 +739,24 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
       return `${sep}<text x="${mid.toFixed(1)}" y="${H - 18}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--v3-navy)">${yr.year}</text>`;
     })
     .join("");
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="الخط الزمني للإرساليات والاشتباهات" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, "عدد الإرساليات (جميع الصور الواردة)")}${bandTitle(botT - 14, "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)")}${lines}${monthLabels}</svg>`;
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="الخط الزمني للحالات الواردة (إرساليات) والاشتباهات" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, "الحالات الواردة (جميع الصور)")}${bandTitle(botT - 14, "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)")}${lines}${monthLabels}</svg>`;
   const total = (vals: number[]) => vals.reduce((a0, b0) => a0 + b0, 0);
   const legend = series
     .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">الإجمالي ${fmtNum(total(ser.values))} · المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / months.length))}</span></div>`)
     .join("");
+  // Source caveats, detected from the figures: months before any missed suspicion was recorded, and
+  // months whose received images are under half the median month (an incomplete population sheet).
+  const mLabel = (k: string) => `${Number(k.slice(5))}/${k.slice(0, 4)}`;
+  const notes: string[] = [];
+  const firstMissed = months.findIndex((x0) => x0.missed > 0);
+  if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${mLabel(months[firstMissed].monthKey)}.`);
+  const sortedImg = months.map((x0) => x0.images ?? 0).sort((a0, b0) => a0 - b0);
+  const median = sortedImg[Math.floor(sortedImg.length / 2)];
+  const thin = months.filter((x0) => (x0.images ?? 0) < median / 2).map((x0) => mLabel(x0.monthKey));
+  if (thin.length) notes.push(`الحالات الواردة في ${thin.join("، ")} أقل من نصف الشهر المعتاد في ملف المجتمع، ويُرجّح أن بيانات تلك الأشهر غير مكتملة في المصدر.`);
   return `${head}
 <div style="display:flex;flex-wrap:wrap;gap:10px 48px;margin-bottom:10px">${legend}</div>
-${svg}`;
+${svg}${notes.length ? `<p class="v3-note" style="margin:6px 0 0;font-size:18px">${notes.map(esc).join(" ")}</p>` : ""}`;
 }
 
 function tiersInner(m: PortReportModel, eyebrow = S3): string {
@@ -804,7 +812,7 @@ export function buildPortReportHtml(m: PortReportModel, workload?: WorkloadSlide
     ".slide.v3 .pr-apx td{height:auto;min-height:28px;overflow:visible;font-size:18px;}.slide.v3 .pr-apx td:first-child{font-size:17px;overflow:visible;}" +
     ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}" +
     // Observations: one size for the main observation, the evidence and the recommendations, on every page.
-    ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:26px;line-height:1.55;}" +
+    ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:24px;line-height:1.55;}" +
     ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}";
   // Long dashes out, including the viewer script's escaped ones ("\u2014" in its page counter).
   return html.replace("</style>", `${centre}</style>`).replace(/[\u2013\u2014]/g, "-").replace(/\\u201[34]/g, "-");
