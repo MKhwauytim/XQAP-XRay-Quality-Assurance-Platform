@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.1",
+    "date": "2026-11-08",
+    "bucket": "fix",
+    "scope": "reports",
+    "title": "PowerPoint and Excel use the Somar font names; the port tool leaves 2024 out by default"
+  },
+  {
     "version": "v160.0",
     "date": "2026-11-08",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "reporting",
     "title": "v159.17 Jeddah port report source, recommendations and 2025-vs-2026 comparison"
-  },
-  {
-    "version": "v159.16",
-    "date": "2026-11-07",
-    "bucket": "fix",
-    "scope": "months",
-    "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
   }
 ];

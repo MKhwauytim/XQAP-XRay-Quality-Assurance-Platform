@@ -78,7 +78,8 @@ function showOptions(d: PortReportData): void {
     }
   }
   const years = [...new Set(months.map((m) => m.slice(0, 4)))];
-  yearsBox.innerHTML = years.map((y) => `<label class="chip"><input type="checkbox" value="${y}" checked> ${y}</label>`).join("");
+  // 2024 is left out by default (the owner removed it from the report); tick it to include it.
+  yearsBox.innerHTML = years.map((y) => `<label class="chip"><input type="checkbox" value="${y}"${y === "2024" && years.length > 1 ? "" : " checked"}> ${y}</label>`).join("");
   lastMonthSelect.innerHTML = months.slice().reverse().map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join("");
   periodInput.dataset.edited = "";
   refreshPeriod();

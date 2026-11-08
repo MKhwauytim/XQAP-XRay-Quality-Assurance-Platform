@@ -41,12 +41,12 @@ describe("deckToPptx helpers", () => {
 });
 
 describe("somarFace", () => {
-  it("picks the installed Somar Sans face for each CSS weight", async () => {
+  it("picks the installed Somar face for each CSS weight", async () => {
     const { somarFace } = await import("./deckToPptx");
-    expect(somarFace(300)).toBe("Somar Sans Light");
-    expect(somarFace(400)).toBe("Somar Sans");
-    expect(somarFace(500)).toBe("Somar Sans Medium");
-    expect(somarFace(600)).toBe("Somar Sans Bold");
-    expect(somarFace(700)).toBe("Somar Sans Bold");
+    expect(somarFace(300)).toBe("Somar Light");
+    expect(somarFace(400)).toBe("Somar");
+    expect(somarFace(500)).toBe("Somar Medium");
+    expect(somarFace(600)).toBe("Somar Bold");
+    expect(somarFace(700)).toBe("Somar Bold");
   });
 });

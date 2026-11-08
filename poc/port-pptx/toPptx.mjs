@@ -24,11 +24,11 @@ const { m } = JSON.parse(readFileSync(join(outDir, "model.json"), "utf8"));
 const reportHtml = readFileSync(join(outDir, "report.html"), "utf8");
 const themeVar = (name) => reportHtml.match(new RegExp(`--v3-${name}:(#[0-9a-fA-F]{6})`))?.[1].slice(1).toUpperCase();
 
-// Somar Sans installs on Windows as one family per weight (the font files name table): Light, Regular,
+// Somar installs on the owner's machines as one family per weight («Somar Light», «Somar», «Somar Medium», «Somar Bold»): Light, Regular,
 // Medium and Bold are four separate faces, so the weight picks the face and bold stays off.
-const FONT = "Somar Sans";
-const FONT_BOLD = "Somar Sans Bold";
-const face = (w) => (w <= 350 ? "Somar Sans Light" : w <= 450 ? FONT : w <= 550 ? "Somar Sans Medium" : FONT_BOLD);
+const FONT = "Somar";
+const FONT_BOLD = "Somar Bold";
+const face = (w) => (w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD);
 const FIT_SAFETY = 1.04;
 const inch = (px) => px / 144;
 const pt = (px) => px * 0.5;
@@ -255,7 +255,7 @@ for (const { chart, series } of timelineMeta) {
     let out = ser.replace(/(<c:spPr>\s*<a:ln[^>]*w=")\d+(")/, `$1${Math.round(s.width * 6350 * 0.75)}$2`);
     if (s.dash !== "solid") out = out.replace(/<a:prstDash val="[^"]*"\/>/, `<a:prstDash val="${s.dash}"/>`);
     const dl = !s.labels ? '<c:dLbls><c:delete val="1"/></c:dLbls>'
-      : `<c:dLbls><c:numFmt formatCode="0&quot;%&quot;" sourceLinked="0"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr rtl="1" algn="r"><a:defRPr sz="800" b="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Somar Sans Bold"/><a:cs typeface="Somar Sans Bold"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:dLblPos val="${s.labels}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
+      : `<c:dLbls><c:numFmt formatCode="0&quot;%&quot;" sourceLinked="0"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr rtl="1" algn="r"><a:defRPr sz="800" b="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Somar Bold"/><a:cs typeface="Somar Bold"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:dLblPos val="${s.labels}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
     out = out.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, dl);
     return out;
   });

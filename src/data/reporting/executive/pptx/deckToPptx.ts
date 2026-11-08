@@ -13,12 +13,12 @@
 import JSZip from "jszip";
 import type { Run, SlideGeo } from "./deckGeometry";
 
-// Somar Sans installs on Windows as one family per weight (the font files name table): Light, Regular,
+// Somar installs on the owner's machines as one family per weight («Somar Light», «Somar», «Somar Medium», «Somar Bold»): Light, Regular,
 // Medium and Bold are four separate faces, so the CSS weight picks the face and PowerPoint bold stays off.
-const FONT = "Somar Sans";
-const FONT_BOLD = "Somar Sans Bold";
+const FONT = "Somar";
+const FONT_BOLD = "Somar Bold";
 export const somarFace = (weight: number): string =>
-  weight <= 350 ? "Somar Sans Light" : weight <= 450 ? FONT : weight <= 550 ? "Somar Sans Medium" : FONT_BOLD;
+  weight <= 350 ? "Somar Light" : weight <= 450 ? FONT : weight <= 550 ? "Somar Medium" : FONT_BOLD;
 const FIT_SAFETY = 1.04;
 const inch = (px: number): number => px / 144;
 const pt = (px: number): number => px * 0.5;
