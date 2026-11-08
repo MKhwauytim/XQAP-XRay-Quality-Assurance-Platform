@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>أداة تقرير المنفذ</title>
+<style>
+  :root { --navy:#10304f; --gold:#b48a3c; --bg:#f7f5f0; --panel:#ffffff; --hair:#ddd8cc; --muted:#6b7280; --red:#b8543f; --green:#2e7d4f; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--navy); font-family:"Segoe UI",Tahoma,Arial,sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:40px 20px 60px; }
+  h1 { margin:0 0 4px; font-size:30px; }
+  .lead { margin:0 0 28px; color:var(--muted); }
+  .card { background:var(--panel); border:1px solid var(--hair); border-top:4px solid var(--navy); padding:22px 24px; margin-bottom:18px; }
+  .card h2 { margin:0 0 14px; font-size:19px; }
+  .drop { display:block; border:2px dashed var(--hair); padding:34px 20px; text-align:center; cursor:pointer; color:var(--muted); transition:background .15s,border-color .15s; }
+  .drop:hover, .drop.over { border-color:var(--gold); background:#fbf8f1; color:var(--navy); }
+  .drop strong { display:block; font-size:18px; color:var(--navy); margin-bottom:6px; }
+  .drop input { display:none; }
+  .bar { height:8px; background:#ece8de; margin:16px 0 8px; overflow:hidden; }
+  .bar > div { height:100%; width:0; background:var(--gold); transition:width .3s; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px 18px; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field.wide { grid-column:1 / -1; }
+  label.t, span.t { font-size:14px; color:var(--muted); }
+  select, input[type=text] { font:inherit; padding:9px 10px; border:1px solid var(--hair); background:#fff; color:var(--navy); }
+  .years { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--hair); padding:7px 12px; background:#fff; cursor:pointer; }
+  .outs { display:flex; flex-wrap:wrap; gap:10px; }
+  button { font:inherit; padding:10px 18px; border:1px solid var(--navy); background:#fff; color:var(--navy); cursor:pointer; }
+  button.primary { background:var(--navy); color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .status { min-height:1.4em; margin:14px 0 0; }
+  .status[data-kind=error] { color:var(--red); }
+  .status[data-kind=ok] { color:var(--green); }
+  .note { color:var(--muted); font-size:13px; margin:12px 0 0; }
+  @media (max-width:640px) { .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>أداة تقرير المنفذ</h1>
+  <p class="lead">ضع ملف البيانات الخام (Excel) واختر المنفذ، وتطلع لك التقارير بصيغ HTML وPDF وPowerPoint وExcel. الملف يُقرأ داخل هذه الصفحة فقط ولا يُرسل لأي مكان.</p>
+
+  <section class="card">
+    <h2>1. ملف البيانات</h2>
+    <label class="drop" id="drop">
+      <strong>اسحب ملف Excel هنا أو اضغط للاختيار</strong>
+      يحتوي على ورقة «نتائج الدراسة» وأوراق المجتمع حسب السنة أو الربع (مثل 2024 و2025-Q1)
+      <input type="file" id="file" accept=".xlsx">
+    </label>
+    <div id="progress" hidden>
+      <div class="bar"><div id="progress-bar"></div></div>
+      <p id="progress-text" class="note"></p>
+    </div>
+  </section>
+
+  <section class="card" id="options" hidden>
+    <h2>2. إعدادات التقرير</h2>
+    <div class="grid">
+      <div class="field">
+        <label class="t" for="port">المنفذ</label>
+        <select id="port"></select>
+      </div>
+      <div class="field">
+        <label class="t" for="name">الاسم في التقرير (اختياري)</label>
+        <input type="text" id="name">
+      </div>
+      <div class="field wide">
+        <span class="t">السنوات المشمولة</span>
+        <div class="years" id="years"></div>
+      </div>
+      <div class="field">
+        <label class="t" for="last-month">آخر شهر في التقرير</label>
+        <select id="last-month"></select>
+      </div>
+      <div class="field">
+        <label class="t" for="period">فترة التقرير كما تظهر في الغلاف</label>
+        <input type="text" id="period">
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. التنزيل</h2>
+    <div class="outs">
+      <button class="primary" data-out="zip" disabled>الكل في ملف مضغوط (HTML وExcel وPowerPoint)</button>
+      <button data-out="pptx" disabled>PowerPoint</button>
+      <button data-out="pdf" disabled>PDF</button>
+      <button data-out="xlsx" disabled>Excel</button>
+      <button data-out="html" disabled>HTML</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+    <p class="note">PDF يفتح التقرير في نافذة جديدة مع نافذة الطباعة: اختر «حفظ كملف PDF». للحصول على نسخة مع 2024 وأخرى بدونها، نزّل مرة والسنة محددة ومرة بدونها.</p>
+  </section>
+</main>
+<script type="module" src="/src/tools/portReportTool/main.ts"></script>
+</body>
+</html>

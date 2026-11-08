@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.0",
+    "date": "2026-11-08",
+    "bucket": "feature",
+    "scope": "reports",
+    "title": "port report tool, one HTML page that turns the raw workbook into the port report"
+  },
+  {
     "version": "v159.24",
     "date": "2026-11-07",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "months",
     "title": "pre-merge review of split and bulk move (re-projection, replicas, lost store, empty list)"
-  },
-  {
-    "version": "v159.15",
-    "date": "2026-11-07",
-    "bucket": "enhancement",
-    "scope": "reporting",
-    "title": "blank L1/L2 cases stay in reports as «نتائج أخرى»"
   }
 ];
