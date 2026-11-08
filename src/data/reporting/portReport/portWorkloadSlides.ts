@@ -30,9 +30,13 @@ export type WorkloadSlideInput = {
   periodLabel: string;
   /** Ports with no employee data, left out of the tiers. */
   unrated: PortWorkload[];
+  /** Per month for the selected port: images received (all shipments), and the studied images that were a missed or a false suspicion. */
+  monthlyCounts?: Array<{ monthKey: string; images: number | null; missed: number; falseSuspicion: number }>;
 };
 
 const SEC = "تأثير عبء العمل على النتائج";
+/** Page eyebrows: w1/w2 open القسم الأول, w3 closes القسم الثاني, and the year comparison (w5) is in ملحق ب. */
+const EYEBROW = { w1: "القسم الأول - أثر العبء التشغيلي على المنفذ", w2: "القسم الأول - أثر العبء التشغيلي على المنفذ", w3: "القسم الثاني - نتائج الدراسة", w5: "ملحق ب - نتائج الدراسة" } as const;
 const TONE: Record<WorkloadTierKey, ChartTone> = { low: "green", mid: "gold", high: "red" };
 const pct = (v: number | null, d = 1) => (v === null ? "—" : `${(v * 100).toFixed(d)}%`);
 const num = (v: number | null) => (v === null ? "—" : fmtNum(Math.round(v)));
@@ -151,7 +155,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
       slideShell(
         meta("w1", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: "تأثير عبء العمل على النتائج" })}
+        `${contentHead({ eyebrow: EYEBROW.w1, title: "تأثير عبء العمل على النتائج" })}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:22px">${cols}</div>
 <p class="v3-note" style="margin-top:10px;font-size:19px"><b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ، ويُحسب لكل نوع منفذ (بري، بحري) على حدة: المنخفض أقل من نصف متوسط النوع، والعالي أكثر من مرة ونصف، والمتوسط بينهما. الموظف المخصص للمنفذ من فحص فيه ${MIN_MONTHLY_EXAMS} حالة على الأقل في الشهر. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.</p>`,
       ),
@@ -194,7 +198,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
       slideShell(
         meta("w2", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: "أثر توزيع القوى العاملة على الفحص بالأشعة" })}
+        `${contentHead({ eyebrow: EYEBROW.w2, title: "أثر توزيع القوى العاملة على الفحص بالأشعة" })}
 ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMonth, L.l1Month, L.l2Month], rows: rowsT, compactHeaders: true, rowPx: 50, firstColWidth: 26 })}
 <div class="v3-two-col" style="grid-template-columns:1.2fr .8fr;gap:40px;margin-top:20px">
   ${tintedPanel({ variant: "all", title: `${w.displayName} حسب السنة`, body: dataTable({ headers: ["السنة", L.images, L.imagesMonth, L.staff, L.staffMonth, L.examsMonth, "المستوى الأول", "المستوى الثاني"], rows: rowsY, compactHeaders: true, rowPx: 44, firstColWidth: 14 }) })}
@@ -232,7 +236,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: SEC, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى العبء التشغيلي" })}
+        `${contentHead({ eyebrow: EYEBROW.w3, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى العبء التشغيلي" })}
 <div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, body: levelTable(p.o) })).join("")}</div>`,
       ),
     );
@@ -313,7 +317,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
         slideShell(
           meta("w5", SEC),
           "",
-          `${contentHead({ eyebrow: SEC, title: `مقارنة ${ys[0].year} و${ys[1].year}: ${w.displayName} ومستويات العبء` })}
+          `${contentHead({ eyebrow: EYEBROW.w5, title: `مقارنة ${ys[0].year} و${ys[1].year}: ${w.displayName} ومستويات العبء` })}
 ${chart}
 <div style="margin-top:14px">${dataTable({ headers, rows, groupStart: [1, 5], compactHeaders: true, rowPx: 50, firstColWidth: 14 }).replace('<table class="v3-table', '<table class="pr-cmp v3-table').replace("<thead>", '<colgroup><col style="width:16%"/><col/><col/><col/><col/><col/><col/><col/><col/></colgroup><thead>')}</div>
 `,

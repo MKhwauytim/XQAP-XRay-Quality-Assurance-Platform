@@ -115,6 +115,29 @@ function probe() {
         } else out.images.push({ ...b, src: el.src });
         return;
       }
+      if ((tag === "svg" || tag === "SVG") && /إرساليات/.test(el.getAttribute("aria-label") ?? "")) {
+        // The monthly counts chart has no native PowerPoint rebuild: it goes in as an svg image,
+        // with the theme colours and the font resolved (an image cannot read the page's CSS variables).
+        const b = box(el.getBoundingClientRect());
+        const clone = el.cloneNode(true);
+        const src = [el, ...el.querySelectorAll("*")];
+        const dst = [clone, ...clone.querySelectorAll("*")];
+        src.forEach((n, i) => {
+          const cs = getComputedStyle(n);
+          for (const a of ["fill", "stroke"]) if ((n.getAttribute(a) ?? "").includes("var(")) dst[i].setAttribute(a, cs[a]);
+        });
+        const vb = el.viewBox.baseVal;
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        clone.setAttribute("width", String(vb.width));
+        clone.setAttribute("height", String(vb.height));
+        clone.setAttribute("font-family", getComputedStyle(el).fontFamily);
+        clone.removeAttribute("style");
+        const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        for (const [k2, v2] of [["x", "0"], ["y", "0"], ["width", String(vb.width)], ["height", String(vb.height)], ["fill", getComputedStyle(el).backgroundColor]]) bgRect.setAttribute(k2, v2);
+        clone.insertBefore(bgRect, clone.firstChild);
+        out.images.push({ ...b, src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(clone.outerHTML)}` });
+        return;
+      }
       if (tag === "svg" || tag === "SVG") {
         const b = box(el.getBoundingClientRect());
         const texts = [...el.querySelectorAll("text")].map((t) => ({ text: t.textContent, size: px(t.getAttribute("font-size")), bold: t.getAttribute("font-weight") === "700", fill: t.getAttribute("fill"), ...box(t.getBoundingClientRect()) }));

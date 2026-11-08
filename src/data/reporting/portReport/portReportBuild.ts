@@ -9,7 +9,7 @@ import JSZip from "jszip";
 import { buildPortNameMap } from "../portNameCanonical";
 import { portReportInputFromSheets } from "./portReportSource";
 import type { PortReportInput, PortReportModel } from "./portReportModel";
-import { buildPortReportModel, listReportPorts } from "./portReportModel";
+import { buildPortReportModel, listReportPorts, STATUS_FALSE_SUSPICION, STATUS_MISSED } from "./portReportModel";
 import { buildPortReportHtml } from "./portReportHtml";
 import { buildPortObservations } from "./portObservations";
 import type { PortObservation } from "./portObservations";
@@ -99,6 +99,17 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
     periodLabel: opts.period,
     unrated: unratedPorts(portWorkloads),
   } as WorkloadSlideInput;
+  // Monthly counts for the selected port: all images received, and the studied images per error.
+  const mc = new Map<string, { monthKey: string; images: number | null; missed: number; falseSuspicion: number }>();
+  const mcAt = (k: string) => { let v = mc.get(k); if (!v) { v = { monthKey: k, images: null, missed: 0, falseSuspicion: 0 }; mc.set(k, v); } return v; };
+  for (const x of months) if (x.port === port) { const v = mcAt(x.month); v.images = (v.images ?? 0) + x.images; }
+  for (const r of input.studies) {
+    if (r.port !== port || !r.monthKey || (opts.lastMonth && r.monthKey > opts.lastMonth)) continue;
+    const v = mcAt(r.monthKey);
+    if (r.imageStatus === STATUS_MISSED) v.missed += 1;
+    else if (r.imageStatus === STATUS_FALSE_SUSPICION) v.falseSuspicion += 1;
+  }
+  workload.monthlyCounts = [...mc.values()].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   // Yearly population for the appendix (images only; the source has no reliable suspicion split).
   const groupOf = new Map(input.studies.map((r) => [r.port, r.group]));
   const popRows = new Map<string, { port: string; group: string; year: number; total: number; suspicion: number }>();
