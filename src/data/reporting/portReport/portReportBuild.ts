@@ -212,7 +212,7 @@ export async function portReportWorkbookBytes(sheets: readonly SheetSpec[]): Pro
   const zip = await JSZip.loadAsync(XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer);
   const stylesFile = zip.file("xl/styles.xml");
   if (stylesFile) {
-    const styles = (await stylesFile.async("string")).replace(/<name val="[^"]*"\/>/g, '<name val="Somar Sans"/>').replace(/<family val="[^"]*"\/>/g, "").replace(/<scheme val="[^"]*"\/>/g, "");
+    const styles = (await stylesFile.async("string")).replace(/<name val="[^"]*"\/>/g, '<name val="Somar"/>').replace(/<family val="[^"]*"\/>/g, "").replace(/<scheme val="[^"]*"\/>/g, "");
     zip.file("xl/styles.xml", styles);
   }
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
