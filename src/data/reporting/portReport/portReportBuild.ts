@@ -135,11 +135,11 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   const allPorts = workload.tiers.flatMap((t) => t.ports);
   const outcomeRow = (label: string, o: LevelOutcomes) => [label, o.image.studied, pct(o.image.accuracy), pct(o.l1.accuracy), pct(o.l2.accuracy), pct(o.image.studied ? o.image.missed / o.image.studied : null), pct(o.image.studied ? o.image.falseSuspicion / o.image.studied : null)];
   const wlSheets: SheetSpec[] = [
-    ["العبء التشغيلي للمنافذ", ["مستوى العبء", "المنفذ", "نوع المنفذ", "الصور الواردة", "صور/شهر", "نسبة الصور عليها كود", "الموظفون (أشخاص)", "الموظفون المكافئون/شهر", "صور/شهر للموظف", "صور/يوم للموظف", "موظفو الأول (مكافئ/شهر)", "صور/يوم - الأول", "موظفو الثاني (مكافئ/شهر)", "صور/يوم - الثاني"],
-      [...allPorts, ...(workload.unrated ?? [])].map((p) => [tierOf(p.port) || "بلا بيانات", p.port, p.type, p.images, round(p.imagesPerMonth), pct(p.codedShare), p.employees, round(p.employeesPerMonth), round(p.perEmployeeMonth), round(p.perEmployeeDay), p.l1Employees, round(p.l1PerDay), p.l2Employees, round(p.l2PerDay)])],
+    ["العبء التشغيلي للمنافذ", ["مستوى العبء", "المنفذ", "نوع المنفذ", "الصور الواردة", "صور/شهر", "نسبة الصور عليها كود", "الموظفون (أشخاص)", "الموظفون المكافئون/شهر", "صور/شهر للموظف", "موظفو الأول (متوسط/شهر)", "صور/شهر للموظف - الأول", "موظفو الثاني (متوسط/شهر)", "صور/شهر للموظف - الثاني"],
+      [...allPorts, ...(workload.unrated ?? [])].map((p) => [tierOf(p.port) || "بلا بيانات", p.port, p.type, p.images, round(p.imagesPerMonth), pct(p.codedShare), p.employees, round(p.employeesPerMonth), round(p.perEmployeeMonth), round(p.l1Employees), round(p.l1PerMonth), round(p.l2Employees), round(p.l2PerMonth)])],
     ["حدود مستويات العبء", ["المستوى", "من (صور للموظف في الشهر)", "إلى (صور للموظف في الشهر)", "عدد المنافذ"], workload.tiers.map((t) => [t.label, round(t.from), round(t.to), t.ports.length])],
-    ["العبء حسب السنة", ["المنفذ", "السنة", "الصور الواردة", "متوسط الصور في الشهر", "نسبة الصور عليها كود", "الموظفون", "متوسط الموظفين في الشهر", "صور/شهر للموظف", "صور/يوم للموظف"],
-      allPorts.flatMap((p) => p.years.map((y) => [p.port, y.year, y.images, round(y.images / Math.max(1, y.months)), pct(y.codedShare), y.employees, round(y.employeesPerMonth), round(y.perEmployeeMonth), round(y.perEmployeeDay)]))],
+    ["العبء حسب السنة", ["المنفذ", "السنة", "الصور الواردة", "متوسط الصور في الشهر", "نسبة الصور عليها كود", "الموظفون", "متوسط الموظفين في الشهر", "صور/شهر للموظف", "صور/شهر للموظف - الأول", "صور/شهر للموظف - الثاني"],
+      allPorts.flatMap((p) => p.years.map((y) => [p.port, y.year, y.images, round(y.images / Math.max(1, y.months)), pct(y.codedShare), y.employees, round(y.employeesPerMonth), round(y.perEmployeeMonth), round(y.l1PerMonth), round(y.l2PerMonth)]))],
     ["الأداء حسب مستوى العبء", ["النطاق", "المدروسة", "نسبة التوائم", "توائم الأول", "توائم الثاني", "الاشتباه الفائت", "الاشتباه الخاطئ"],
       [...workload.tiers.map((t) => outcomeRow(`المستوى ${t.label} (دون ${workload.displayName})`, workload.outcomes[t.key])), outcomeRow(workload.displayName, workload.outcomes.selected)]],
   ];
@@ -169,7 +169,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   );
   sheets.splice(2 + wlSheets.length, 0,
     ["إجماليات مستويات العبء", ["المستوى", "إجمالي الصور", "متوسط الصور في الشهر", "إجمالي الموظفين المخصصين", "متوسط الموظفين في الشهر"], totals.map((t) => [t.label, t.images, round(t.imagesPerMonth), t.people, round(t.staffPerMonth)])],
-    ["القوى العاملة حسب المستوى", ["النطاق", "متوسط الصور في الشهر", "متوسط الموظفين في الشهر", "متوسط الحالات المفحوصة في الشهر للموظف", "متوسط إنجاز الموظف في اليوم"], workforceFigures(workload).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.perEmployeeDay)])],
+    ["القوى العاملة حسب المستوى", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
     ["متوسط العبء حسب نوع المنفذ", ["نوع المنفذ", "متوسط الحالات المفحوصة في الشهر للموظف", "المنخفض أقل من", "العالي أكثر من"], types.map((ty) => [ty, round(workload.tiers[0].averages[ty]), round(workload.tiers[0].ranges[ty][1]), round(workload.tiers[2]?.ranges[ty][0])])],
     ["المستويان حسب مستوى العبء", ["النطاق", "المستوى", ...scHead], scopes.flatMap(([n, o]) => [[n, ...sc("المستوى الأول", o.l1)], [n, ...sc("المستوى الثاني", o.l2)]])],
     ["الأداء حسب السنة", ["السنة", "النطاق", "المستوى", ...scHead],

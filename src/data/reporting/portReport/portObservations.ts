@@ -188,13 +188,13 @@ export function buildPortObservations(m: PortReportModel, w?: WorkloadSlideInput
         topic: "عبء العمل",
         title: `ارتفاع عبء العمل في ${name}، حيث يقع في مستوى العبء العالي ونسبة التوائم فيه أقل من مستوى العبء المنخفض.`,
         evidence: [
-          `بلغ متوسط الحالات المفحوصة في الشهر للموظف في ${name} (${fmtNum(Math.round(selPort.perEmployeeMonth))}) حالة في سنة ${w.loadYear}${typeAvg === undefined ? "" : `، مقابل متوسط (${fmtNum(Math.round(typeAvg))}) حالة في ${typeName}`}.`,
-          `بلغ متوسط الموظفين في الشهر في ${name} (${fmtNum(Math.round(selPort.employeesPerMonth ?? 0))}) موظفًا.`,
+          `بلغ متوسط عدد الحالات المفحوصة للموظف الواحد في الشهر في ${name} (${fmtNum(Math.round(selPort.perEmployeeMonth))}) حالة في سنة ${w.loadYear}${typeAvg === undefined ? "" : `، مقابل متوسط (${fmtNum(Math.round(typeAvg))}) حالة في ${typeName}`}.`,
+          `بلغ متوسط عدد الموظفين في الشهر في ${name} (${fmtNum(Math.round(selPort.employeesPerMonth ?? 0))}) موظفًا.`,
           `بلغت نسبة التوائم في ${name} ${rateOf(sel.image.matched, sel.image.studied)}، مقابل ${rateOf(lowOutcome.matched, lowOutcome.studied)} في ${tierName(low.label)}.`,
         ],
         recommendations: [
-          `مراجعة توزيع الموظفين المخصصين لـ ${name} بما يخفض متوسط الحالات المفحوصة في الشهر للموظف نحو متوسط ${typeName}.`,
-          REC.periodic(`متوسط الحالات المفحوصة في الشهر للموظف في ${name}`),
+          `مراجعة توزيع الموظفين المخصصين لـ ${name} بما يخفض متوسط عدد الحالات المفحوصة للموظف الواحد نحو متوسط ${typeName}.`,
+          REC.periodic(`متوسط عدد الحالات المفحوصة للموظف الواحد في ${name}`),
         ],
         source: `تأثير عبء العمل على النتائج (سنة ${w.loadYear})`,
       });

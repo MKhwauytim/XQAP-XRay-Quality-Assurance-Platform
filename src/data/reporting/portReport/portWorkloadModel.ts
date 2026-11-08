@@ -77,6 +77,9 @@ export type EmployeeLoad = {
   l2Employees: number | null;
   l1PerDay: number | null;
   l2PerDay: number | null;
+  /** Mean cases per assigned level-1 / level-2 employee per month (same staff rule as perEmployeeMonth). */
+  l1PerMonth: number | null;
+  l2PerMonth: number | null;
 };
 
 export type PortWorkloadYear = EmployeeLoad & { year: number; images: number; coded: number; codedShare: number | null; months: number };
@@ -117,7 +120,7 @@ const mean = (xs: Array<number | null>): number | null => {
 function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTotals, year?: string): EmployeeLoad {
   const ok = months.filter((m) => (!year || m.month.startsWith(year)) && m.images > 0 && m.coded / m.images >= RELIABLE_CODE_SHARE);
   if (!ok.length) {
-    return { employees: null, employeesPerMonth: null, perEmployeeMonth: null, perEmployeeDay: null, l1Employees: null, l2Employees: null, l1PerDay: null, l2PerDay: null };
+    return { employees: null, employeesPerMonth: null, perEmployeeMonth: null, perEmployeeDay: null, l1Employees: null, l2Employees: null, l1PerDay: null, l2PerDay: null, l1PerMonth: null, l2PerMonth: null };
   }
   void totals;
   // Assigned staff (owner's rule, 2026-11-04): in a month, an employee belongs to a port only
@@ -141,6 +144,8 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
       fte1: s1,
       fte2: s2,
       perEmp: staff.size > 0 ? (e1 + e2) / staff.size : null,
+      l1Month: s1 > 0 ? e1 / s1 : null,
+      l2Month: s2 > 0 ? e2 / s2 : null,
       l1Day: s1 > 0 ? e1 / s1 / days : null,
       l2Day: s2 > 0 ? e2 / s2 / days : null,
       days,
@@ -161,6 +166,8 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
     l2Employees: mean(perMonth.map((x) => x.fte2)),
     l1PerDay: mean(perMonth.map((x) => x.l1Day)),
     l2PerDay: mean(perMonth.map((x) => x.l2Day)),
+    l1PerMonth: mean(perMonth.map((x) => x.l1Month)),
+    l2PerMonth: mean(perMonth.map((x) => x.l2Month)),
   };
 }
 
@@ -268,6 +275,8 @@ export function buildWorkloadTiers(all: readonly PortWorkload[]): WorkloadTier[]
         l2Employees: f((p) => p.l2Employees),
         l1PerDay: f((p) => p.l1PerDay),
         l2PerDay: f((p) => p.l2PerDay),
+        l1PerMonth: f((p) => p.l1PerMonth),
+        l2PerMonth: f((p) => p.l2PerMonth),
       },
     };
   });
