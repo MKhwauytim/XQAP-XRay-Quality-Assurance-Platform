@@ -35,8 +35,8 @@ const CODE2_2025 = ["موظف المستوى الثاني"];
 /** Result codes that are a system, not a person. */
 const NON_EMPLOYEE = new Set(["X-RAY", "XRAY"]);
 
-/** The population sheets: «2024», «2025-Q1», «Q4B». */
-export const isWorkloadSheet = (name: string): boolean => /^(\d{4}(-Q\d)?|Q\dB)$/.test(name);
+/** The population sheets the report reads: «2025», «2025-Q1», «Q4B». Sheets before 2025 («2024») are skipped: 2024 is not part of the report. */
+export const isWorkloadSheet = (name: string): boolean => /^(\d{4}(-Q\d)?|Q\dB)$/.test(name) && !(/^\d{4}/.test(name) && name.slice(0, 4) < "2025");
 
 /** Oldest first and Q4B last, so a duplicate keeps the row from its own period sheet. */
 export function orderWorkloadSheets<T>(sheets: readonly T[], nameOf: (s: T) => string): T[] {

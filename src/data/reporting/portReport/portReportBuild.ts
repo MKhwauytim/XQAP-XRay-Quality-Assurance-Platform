@@ -22,6 +22,10 @@ import type { WorkloadMonth } from "./workloadAggregate";
 type Rows = unknown[][];
 
 /** Port names the source spells two ways, mapped to the spelling the report uses. */
+/** The report covers 2025 onward: 2024 (study rows by capture year or entry month, and the 2024 population sheet) is never read into it. */
+export const FIRST_REPORT_YEAR = "2025";
+const inReportYears = (ym: string) => ym.slice(0, 4) >= FIRST_REPORT_YEAR;
+
 const PORT_ALIASES: Record<string, string> = { "الرياض - الميناء الجاف": "ميناء الرياض الجاف" };
 
 export type PortReportOptions = {
@@ -29,7 +33,7 @@ export type PortReportOptions = {
   port: string;
   /** The name printed on the report; defaults to the canonical port name. */
   displayName?: string;
-  /** «من 1 يناير 2024 إلى 30 سبتمبر 2026». */
+  /** «من 1 يناير 2025 إلى 30 سبتمبر 2026». */
   period: string;
   /** «YYYY-MM»: rows dated after this month are left out. */
   lastMonth?: string;
@@ -64,7 +68,7 @@ export function listPortsInData(data: PortReportData): string[] {
 
 /** The first and last month present in the population sheets («YYYY-MM»). */
 export function monthRange(data: PortReportData): { first: string; last: string } | null {
-  const ms = data.workloadMonths.map((m) => m.month).sort();
+  const ms = data.workloadMonths.map((m) => m.month).filter(inReportYears).sort();
   return ms.length ? { first: ms[0], last: ms[ms.length - 1] } : null;
 }
 
@@ -79,10 +83,11 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   const input = studyInput(data, opts.period);
   const canon = portNameLookup(data, input);
   for (const r of input.studies) r.port = canon(r.port);
+  input.studies = input.studies.filter((r) => (r.year === null || String(r.year) >= FIRST_REPORT_YEAR) && (!r.monthKey || inReportYears(r.monthKey)));
   const excludeYears = new Set(opts.excludeYears ?? []);
   if (excludeYears.size) input.studies = input.studies.filter((r) => r.year === null || !excludeYears.has(String(r.year)));
   const months = data.workloadMonths
-    .filter((x) => (!opts.lastMonth || x.month <= opts.lastMonth) && !excludeYears.has(x.month.slice(0, 4)))
+    .filter((x) => inReportYears(x.month) && (!opts.lastMonth || x.month <= opts.lastMonth) && !excludeYears.has(x.month.slice(0, 4)))
     .map((x) => ({ ...x, port: canon(x.port) }));
   const portWorkloads = buildPortWorkloads(months);
   const tiers = buildWorkloadTiers(portWorkloads);
