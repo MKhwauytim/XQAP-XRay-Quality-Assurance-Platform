@@ -60,15 +60,16 @@ const PCT_AXIS = { min: 0, max: 110 };
 const p100 = (v: number | null): number | null => (v === null ? null : v * 100);
 
 /** The outcome columns every results table shares, in the owner's order. */
-const OUTCOME_HEADERS = ["المدروسة", "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ", AGREEMENT];
+// «اشتباه صحيح» and «سليمة صحيحة» are left out (owner, 2026-11-08). Each error count carries its share of
+// the studied images, so the missed share + the false share + نسبة التوائم add up to 100%.
+const OUTCOME_HEADERS = ["المدروسة", "الاشتباه الفائت", "الاشتباه الخاطئ", AGREEMENT];
+const withShare = (n: number, of: number) => `${fmtNum(n)} <span class="v3-sub" style="font-size:16px;color:var(--v3-muted)">(${pct(rate(n, of))})</span>`;
 function outcomeCells(label: string, o: OutcomeStats): TableCell[] {
   return [
     { html: esc(label) },
     { html: fmtNum(o.studied), cls: "v-navy" },
-    { html: fmtNum(o.trueSuspicion), cls: "v-green" },
-    { html: fmtNum(o.trueClear), cls: "v-green" },
-    { html: fmtNum(o.missed), cls: "v-red" },
-    { html: fmtNum(o.falseSuspicion), cls: "v-gold" },
+    { html: withShare(o.missed, o.studied), cls: "v-red" },
+    { html: withShare(o.falseSuspicion, o.studied), cls: "v-gold" },
     { html: pct(o.accuracy), cls: "v-navy" },
   ];
 }
@@ -172,7 +173,6 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
           dotTone: "red",
           title: "مصطلحات النتائج",
           terms: [
-            { term: "اشتباه صحيح / سليمة صحيحة", definition: "نتيجة اشتباه أو سليمة وافقها أخصائي ضمان جودة الأشعة." },
             { term: "الاشتباه الفائت", definition: MISSED_DEFINITION },
             { term: "الاشتباه الخاطئ", definition: FALSE_DEFINITION },
           ],
@@ -340,10 +340,8 @@ ${chart}
       { html: strong ? `<b>${esc(label)}</b>` : esc(label) },
       { html: fmtNum(o.studied), cls: "v-navy" },
       { html: pct(o.accuracy), cls: "v-navy" },
-      { html: fmtNum(o.trueSuspicion), cls: "v-green" },
-      { html: fmtNum(o.trueClear), cls: "v-green" },
-      { html: fmtNum(o.missed), cls: "v-red" },
-      { html: fmtNum(o.falseSuspicion), cls: "v-gold" },
+      { html: withShare(o.missed, o.studied), cls: "v-red" },
+      { html: withShare(o.falseSuspicion, o.studied), cls: "v-gold" },
     ];
     b("results").push(
       slideShell(
@@ -353,7 +351,7 @@ ${chart}
 <div class="v3-two-col" style="grid-template-columns:1fr 1.25fr;gap:56px">
   <div class="v3-chart-col">${chartTitleRow({ title: `${AGREEMENT} حسب نوع المنفذ` })}${chart}</div>
   <div style="${RULE}display:flex;flex-direction:column">${chartTitleRow({ title: "التفصيل حسب نوع المنفذ" })}<div style="height:560px;display:flex">${dataTable({
-    headers: ["نوع المنفذ", "المدروسة", AGREEMENT, "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ"],
+    headers: ["نوع المنفذ", "المدروسة", AGREEMENT, "الاشتباه الفائت", "الاشتباه الخاطئ"],
     rows: types.map((g) => row(g.label, g.image, g.label === m.group)),
     totals: row("جميع المنافذ", a.image),
     groupStart: 3,
@@ -813,7 +811,10 @@ export function buildPortReportHtml(m: PortReportModel, workload?: WorkloadSlide
     ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}" +
     // Observations: one size for the main observation, the evidence and the recommendations, on every page.
     ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:24px;line-height:1.55;}" +
-    ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}";
+    ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}" +
+    // Side-by-side panels: one-line titles, so every panel's table starts at the same height.
+    ".slide.v3 .pr-eq .v3-panel-title,.slide.v3 .v3-two-col .v3-panel-title{white-space:nowrap;}" +
+    ".slide.v3 .pr-eq .v3-panel-head{flex-wrap:nowrap;}";
   // Long dashes out, including the viewer script's escaped ones ("\u2014" in its page counter).
   return html.replace("</style>", `${centre}</style>`).replace(/[\u2013\u2014]/g, "-").replace(/\\u201[34]/g, "-");
 }

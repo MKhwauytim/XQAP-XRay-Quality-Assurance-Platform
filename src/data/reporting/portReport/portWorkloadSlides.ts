@@ -243,7 +243,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: EYEBROW.w3, title: "نتائج المستوى الأول والمستوى الثاني حسب مستوى الدقة", note: `المنافذ (دون ${esc(w.displayName)}) مرتبة حسب ${"نسبة التوائم"} ومقسومة ثلاثة أثلاث` })}
+        `${contentHead({ eyebrow: EYEBROW.w3, title: "المستوى الأول والثاني حسب مستوى الدقة", note: "المنافذ مقسومة أثلاثاً حسب نسبة التوائم" })}
 <div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, note: p.note, body: levelTable(p.o) })).join("")}</div>`,
       ),
     );

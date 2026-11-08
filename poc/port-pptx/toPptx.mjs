@@ -238,6 +238,14 @@ for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slides|charts)\/
     if (last < t.length) parts.push(run(t.slice(last), false));
     return parts.join("");
   });
+  // Page number «NN / TT»: NN becomes PowerPoint's slide-number field, so it stays right when
+  // slides are moved, added or deleted in PowerPoint (a fixed «22» on slide 6 was reported).
+  if (name.includes("slides/")) xml = xml.replace(/<a:r>(<a:rPr\b[^>]*?(?:\/>|>(?:(?!<\/?a:r>)[\s\S])*?<\/a:rPr>))<a:t>(\d{2,3}) \/ (\d+)<\/a:t><\/a:r>/g, (mm, rPr, num, total) => {
+    stats.slideNum = (stats.slideNum ?? 0) + 1;
+    return `<a:fld id="{5C1E9B1A-7D2B-4C3E-9F1A-2B6D8E4A0C11}" type="slidenum">${rPr}<a:t>${num}</a:t></a:fld><a:r>${rPr}<a:t> / ${total}</a:t></a:r>`;
+  });
+  // Two runs in a right-to-left paragraph display in reverse («48 / 25»): the page-number paragraph is left-to-right.
+  if (name.includes("slides/")) xml = xml.replace(/<a:p>((?:(?!<\/a:p>)[\s\S])*?type="slidenum"[\s\S]*?<\/a:p>)/g, (p, inner) => `<a:p>${inner.replace(/<a:pPr\b([^>]*?)rtl="1"/, '<a:pPr$1rtl="0"')}`);
   zip.file(name, xml);
 }
 for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(n))) {
