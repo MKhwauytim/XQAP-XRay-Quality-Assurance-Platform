@@ -133,6 +133,9 @@ export type AccuracyTier = {
   studied: number;
   meanAccuracy: number | null;
   meanStudied: number | null;
+  /** The tier's missed and false suspicions, summed over its employees. */
+  missed: number;
+  falseSuspicion: number;
 };
 
 export type HistogramBin = { from: number; to: number; count: number; tier: AccuracyTier["key"] };
@@ -296,12 +299,16 @@ export function buildAccuracyDistribution(employees: readonly EmployeeRow[]): Ac
     studied: 0,
     meanAccuracy: null,
     meanStudied: null,
+    missed: 0,
+    falseSuspicion: 0,
   }));
   const accSum = [0, 0, 0];
   for (const e of eligible) {
     const i = tierIndex(e.accuracy as number);
     tiers[i].count += 1;
     tiers[i].studied += e.studied;
+    tiers[i].missed += e.missed;
+    tiers[i].falseSuspicion += e.falseSuspicion;
     accSum[i] += e.accuracy as number;
   }
   tiers.forEach((t, i) => {

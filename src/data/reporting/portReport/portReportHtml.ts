@@ -435,15 +435,21 @@ ${chart}
     const chart = groupedBarChart({
       groups: groups.map((g) => ({ label: g.label, a: { label: "", value: p100(g.l1.accuracy) }, b: { label: "", value: p100(g.l2.accuracy) } })),
       ...PCT_AXIS,
-      plotHeight: 320,
+      plotHeight: 250,
       groupWidthPct: 26,
     });
+    // Each error count with its share of that level's studied answers beneath it.
+    const share = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub" style="font-size:15px;color:var(--v3-muted)">(${pct(of ? n / of : null)})</span>`;
     const rows: TableCell[][] = groups.map((g) => [
       { html: g.label === m.group ? `<b>${esc(g.label)}</b>` : g.label === "منفذ بحري" ? `منفذ بحري <span class="v3-sub">(دون ${esc(m.displayName)})</span>` : esc(g.label) },
       { html: fmtNum(g.l1.studied), cls: "v-navy" },
       { html: pct(g.l1.accuracy), cls: "v-gold" },
+      { html: share(g.l1.missed, g.l1.studied), cls: "v-red" },
+      { html: share(g.l1.falseSuspicion, g.l1.studied), cls: "v-gold" },
       { html: fmtNum(g.l2.studied), cls: "v-navy" },
       { html: pct(g.l2.accuracy), cls: "v-navy" },
+      { html: share(g.l2.missed, g.l2.studied), cls: "v-red" },
+      { html: share(g.l2.falseSuspicion, g.l2.studied), cls: "v-gold" },
     ]);
         b("staffVs").push(
       slideShell(
@@ -452,7 +458,7 @@ ${chart}
         `${contentHead({ eyebrow: SEC3, title: `أداء منسوبي ${m.displayName} مقارنة بالمنافذ البرية والبحرية` })}
 ${legendRow([{ swatch: "gold", text: `${AGREEMENT} - المستوى الأول` }, { swatch: "blue", text: `${AGREEMENT} - المستوى الثاني` }])}
 ${chart}
-<div style="margin-top:22px">${dataTable({ headers: ["نوع المنفذ", "إجابات المستوى الأول", `${AGREEMENT} - الأول`, "إجابات المستوى الثاني", `${AGREEMENT} - الثاني`], rows, groupStart: 3, compactHeaders: true, rowPx: 50 })}</div>
+<div style="margin-top:22px">${dataTable({ headers: ["نوع المنفذ", "إجابات الأول", `${AGREEMENT} - الأول`, "الفائت - الأول", "الخاطئ - الأول", "إجابات الثاني", `${AGREEMENT} - الثاني`, "الفائت - الثاني", "الخاطئ - الثاني"], rows, groupStart: 5, compactHeaders: true, rowPx: 56 })}</div>
 <p class="v3-note" style="margin-top:8px;font-size:21px">المقارنة على مستوى إجابات كل مستوى على حدة. «منفذ بحري» هنا المنافذ البحرية دون ${esc(m.displayName)}.</p>`,
       ),
     );
@@ -783,7 +789,7 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
         barMaxWidth: 110,
         gap: 14,
         pad: 10,
-        plotHeight: 250,
+        plotHeight: 185,
         valueFormat: (v) => fmtNum(Math.round(v)),
       });
       const table = kvTable([
@@ -791,6 +797,8 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
         { label: "تنتهي عند", value: pct(t.to) },
         { label: "عدد الموظفين", value: fmtNum(t.count) },
         { label: "متوسط دقة الموظفين", value: pct(t.meanAccuracy), cls: `v-${tone}` },
+        { label: "معدل الاشتباه الفائت", value: pct(t.studied ? t.missed / t.studied : null), cls: "v-red" },
+        { label: "معدل الاشتباه الخاطئ", value: pct(t.studied ? t.falseSuspicion / t.studied : null), cls: "v-gold" },
         { label: "متوسط الحالات لكل موظف", value: t.meanStudied === null ? "—" : fmtNum(Math.round(t.meanStudied)), cls: "v-muted" },
       ]);
       return `<div style="display:flex;flex-direction:column;min-width:0;${i > 0 ? RULE : ""}">
