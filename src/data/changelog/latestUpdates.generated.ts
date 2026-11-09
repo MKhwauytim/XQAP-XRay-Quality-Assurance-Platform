@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.8",
+    "date": "2026-11-09",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.8 tier tables line up, basis line under the tier titles"
+  },
+  {
     "version": "v160.7",
     "date": "2026-11-09",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "reports",
     "title": "work report email by day, week, month or a picked period, weekends included"
-  },
-  {
-    "version": "v159.23",
-    "date": "2026-11-07",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "weekly work report email next to the daily one"
   }
 ];

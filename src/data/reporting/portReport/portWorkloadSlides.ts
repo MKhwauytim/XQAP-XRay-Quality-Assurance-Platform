@@ -134,7 +134,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   const others = (t: WorkloadTier) => t.ports.filter((p) => p.port !== w.port);
 
   // 1 — Workload tiers: each tier's totals, then its ports. 1b — the same page on the images-per-month tiers.
-  const tierPage = (tiers: WorkloadTier[], key: string, title: string, note: string, prefix: string) => {
+  const tierPage = (tiers: WorkloadTier[], key: string, title: string, basis: string, note: string, prefix: string) => {
     const stat = (label: string, value: string) =>
       `<div style="padding:6px 0;border-bottom:1px solid var(--v3-hair)"><div style="font-size:18px;color:var(--v3-muted);white-space:nowrap">${esc(label)}</div><div style="font-size:36px;font-weight:700;color:var(--v3-navy);line-height:1.15">${esc(value)}</div></div>`;
     const padRows = Math.max(...tiers.map((x) => x.ports.length));
@@ -151,7 +151,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;border-top:4px solid var(--v3-${TONE[t.key]});margin-bottom:14px">
     ${stat(L.images, num(a.images))}${stat(L.imagesMonth, num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat("متوسط الموظفين في الشهر للمنفذ", num(meanOf(t.ports.map((p) => p.employeesPerMonth))))}
   </div>
-  ${dataTable({ headers: ["النوع", "المنفذ", L.images, L.imagesMonth, L.staffMonth, "حالات الموظف في الشهر"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-wrap pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:30%"/><col style="width:20%"/><col style="width:14%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
+  ${dataTable({ headers: ["النوع", "المنفذ", "إجمالي الصور", "الصور شهرياً", "الموظفون شهرياً", "حالات الموظف شهرياً"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:30%"/><col style="width:19%"/><col style="width:15%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
 </div>`;
       })
       .join("");
@@ -160,14 +160,15 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
         meta(key, SEC),
         "",
         `${contentHead({ eyebrow: EYEBROW.w1, title })}
+<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:22px">${cols}</div>
 <p class="v3-note" style="margin-top:10px;font-size:19px">${note}</p>`,
       ),
     );
   };
   const staffNote = `الموظفون: كل من فحص حالة واحدة على الأقل في المنفذ، ومتوسطهم عددهم في كل شهر. متوسط حالات الموظف: الموظفون الذين فحصوا أقل من ${Math.round(POOL_SHARE * 100)}% من متوسط الشهر تُجمع حالاتهم وتُحسب موظفين مكافئين. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.`;
-  tierPage(w.tiers, "w1", "تأثير عبء العمل على النتائج", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء");
-  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير حجم الصور على النتائج", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم");
+  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على متوسط فحص الموظف في الشهر", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء");
+  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم");
 
   // 2 — Workforce distribution: images, staff and each employee's output per tier.
   {
