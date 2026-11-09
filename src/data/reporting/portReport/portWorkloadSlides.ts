@@ -78,15 +78,21 @@ export function groupTotals(ps: readonly PortWorkload[]) {
     const ws = sum((p) => (g(p) === null ? null : w(p)));
     return ws > 0 ? sum((p) => (g(p) ?? 0) * (w(p) ?? 0)) / ws : null;
   };
+  const pooled = (k: "all" | "l1" | "l2") => {
+    const ps2 = ps.filter((p) => p.pool && p.perEmployeeMonth !== null);
+    const eq = ps2.reduce((a, p) => a + (p.pool?.[k].eq ?? 0), 0);
+    return ps2.length && eq > 0 ? ps2.reduce((a, p) => a + (p.pool?.[k].n ?? 0), 0) / eq : null;
+  };
   return {
     images: sum((p) => p.images),
     imagesPerMonth: sum((p) => p.imagesPerMonth),
     people: people.size,
     staffPerMonth: sum((p) => p.employeesPerMonth),
-    perEmployeeMonth: weighted((p) => p.perEmployeeMonth),
-    // Each level weighted by its own monthly staff (= the group's level examinations / its level staff).
-    l1PerMonth: levelWeighted((p) => p.l1PerMonth, (p) => p.l1Employees),
-    l2PerMonth: levelWeighted((p) => p.l2PerMonth, (p) => p.l2Employees),
+    // The group's examinations ÷ its equivalent employees, for all and per level, so the overall
+    // figure always sits with its two levels.
+    perEmployeeMonth: pooled("all") ?? weighted((p) => p.perEmployeeMonth),
+    l1PerMonth: pooled("l1") ?? levelWeighted((p) => p.l1PerMonth, (p) => p.l1Employees),
+    l2PerMonth: pooled("l2") ?? levelWeighted((p) => p.l2PerMonth, (p) => p.l2Employees),
   };
 }
 
@@ -95,17 +101,20 @@ export function groupTotals(ps: readonly PortWorkload[]) {
  * mean images per month (load year) and mean staff per month of its ports, and its examinations per
  * employee per month (overall and per level) weighted by staff; the selected port is inserted after its own tier.
  */
-export function workforceFigures(w: WorkloadSlideInput): Array<{ label: string; key?: WorkloadTierKey; selected: boolean; imagesPerMonth: number | null; staffPerMonth: number | null; perEmployeeMonth: number | null; l1PerMonth: number | null; l2PerMonth: number | null }> {
-  const loadImagesMonth = (p: PortWorkload) => { const y = p.years.find((x) => String(x.year) === w.loadYear); return y ? y.images / Math.max(1, y.months) : null; };
-  const rows: ReturnType<typeof workforceFigures> = w.tiers.map((t) => {
-    const ps = t.ports.filter((p) => p.port !== w.port);
-    const g = groupTotals(ps);
-    return { label: `المستوى ${t.label}`, key: t.key, selected: false, imagesPerMonth: meanOf(ps.map(loadImagesMonth)), staffPerMonth: meanOf(ps.map((p) => p.employeesPerMonth)), perEmployeeMonth: g.perEmployeeMonth, l1PerMonth: g.l1PerMonth, l2PerMonth: g.l2PerMonth };
-  });
-  const selTier = w.tiers.findIndex((t) => t.ports.some((p) => p.port === w.port));
-  const sel = w.tiers.flatMap((t) => t.ports).find((p) => p.port === w.port);
-  if (sel) rows.splice(selTier + 1, 0, { label: w.displayName, selected: true, imagesPerMonth: loadImagesMonth(sel), staffPerMonth: sel.employeesPerMonth, perEmployeeMonth: sel.perEmployeeMonth, l1PerMonth: sel.l1PerMonth, l2PerMonth: sel.l2PerMonth });
+export function workforceFigures(w: WorkloadSlideInput, tiers: readonly WorkloadTier[] = w.tiers): Array<{ label: string; key?: WorkloadTierKey; selected: boolean; imagesPerMonth: number | null; staffPerMonth: number | null; perEmployeeMonth: number | null; l1PerMonth: number | null; l2PerMonth: number | null }> {
+  // The same figures, defined the same way, as the tier pages (tierFigures): every port of the tier,
+  // the selected one included, then the selected port on its own after its tier.
+  const rows: ReturnType<typeof workforceFigures> = tiers.map((t) => ({ label: `المستوى ${t.label}`, key: t.key, selected: false, ...tierFigures(t.ports) }));
+  const selTier = tiers.findIndex((t) => t.ports.some((p) => p.port === w.port));
+  const sel = tiers.flatMap((t) => t.ports).find((p) => p.port === w.port);
+  if (sel) rows.splice(selTier + 1, 0, { label: w.displayName, selected: true, imagesPerMonth: sel.imagesPerMonth, staffPerMonth: sel.employeesPerMonth, perEmployeeMonth: sel.perEmployeeMonth, l1PerMonth: sel.l1PerMonth, l2PerMonth: sel.l2PerMonth });
   return rows;
+}
+
+/** A tier's figures as both the tier page and the workforce page show them: means per port, and cases per employee as Σ examinations ÷ Σ equivalent employees. */
+export function tierFigures(ps: readonly PortWorkload[]) {
+  const g = groupTotals(ps);
+  return { images: g.images, imagesPerMonth: meanOf(ps.map((p) => p.imagesPerMonth)), people: g.people, staffPerMonth: meanOf(ps.map((p) => p.employeesPerMonth)), perEmployeeMonth: g.perEmployeeMonth, l1PerMonth: g.l1PerMonth, l2PerMonth: g.l2PerMonth };
 }
 
 /** Appendix page: every port's workload figures in one table, grouped by tier. */
@@ -131,10 +140,9 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
   const sel = w.tiers.flatMap((t) => t.ports).find((p) => p.port === w.port);
   if (!sel) return parts;
   const tierName = (t: WorkloadTier) => `المستوى ${t.label}`;
-  const others = (t: WorkloadTier) => t.ports.filter((p) => p.port !== w.port);
 
   // 1 — Workload tiers: each tier's totals, then its ports. 1b — the same page on the images-per-month tiers.
-  const tierPage = (tiers: WorkloadTier[], key: string, title: string, basis: string, note: string, prefix: string) => {
+  const tierPage = (tiers: WorkloadTier[], key: string, title: string, basis: string, note: string, prefix: string, unit: string) => {
     const stat = (label: string, value: string) =>
       `<div style="padding:6px 0;border-bottom:1px solid var(--v3-hair)"><div style="font-size:18px;color:var(--v3-muted);white-space:nowrap">${esc(label)}</div><div style="font-size:36px;font-weight:700;color:var(--v3-navy);line-height:1.15">${esc(value)}</div></div>`;
     const padRows = Math.max(...tiers.map((x) => x.ports.length));
@@ -145,11 +153,12 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
           const cell = (html: string, cls = "v-navy"): TableCell => ({ html: hl ? `<b>${html}</b>` : html, cls: hl ? "v-gold" : cls });
           return [cell(esc(typeShort(p.type)), "v-muted"), cell(esc(hl ? w.displayName : p.port), ""), cell(fmtNum(p.images)), cell(num(p.imagesPerMonth)), cell(num(p.employeesPerMonth)), cell(num(p.perEmployeeMonth))];
         });
-        const a = groupTotals(t.ports);
+        const a = tierFigures(t.ports);
         return `<div style="display:flex;flex-direction:column;min-width:0;${i > 0 ? RULE : ""}">
   ${chartTitleRow({ title: `${prefix} ${t.label}` })}
+  <div style="margin:-6px 0 8px;font-size:17px;color:var(--v3-muted);white-space:nowrap">من ${num(t.from)} إلى ${num(t.to)} ${unit}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px;border-top:4px solid var(--v3-${TONE[t.key]});margin-bottom:14px">
-    ${stat(L.images, num(a.images))}${stat(L.imagesMonth, num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat("متوسط الموظفين في الشهر للمنفذ", num(meanOf(t.ports.map((p) => p.employeesPerMonth))))}
+    ${stat(L.images, num(a.images))}${stat("متوسط الصور في الشهر للمنفذ", num(a.imagesPerMonth))}${stat(L.staff, num(a.people))}${stat("متوسط الموظفين في الشهر للمنفذ", num(a.staffPerMonth))}
   </div>
   ${dataTable({ headers: ["النوع", "المنفذ", "إجمالي الصور", "الصور شهرياً", "الموظفون شهرياً", "حالات الموظف شهرياً"], rows, firstColWidth: 14, compactHeaders: true, rowPx: 40, padToRows: padRows }).replace('<table class="v3-table', '<table class="pr-pop pr-dense pr-tier v3-table').replace("<thead>", '<colgroup><col style="width:7%"/><col style="width:30%"/><col style="width:19%"/><col style="width:15%"/><col style="width:14%"/><col style="width:15%"/></colgroup><thead>')}
 </div>`;
@@ -167,13 +176,13 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
     );
   };
   const staffNote = `الموظفون: كل من فحص حالة واحدة على الأقل في المنفذ، ومتوسطهم عددهم في كل شهر. متوسط حالات الموظف: الموظفون الذين فحصوا أقل من ${Math.round(POOL_SHARE * 100)}% من متوسط الشهر تُجمع حالاتهم وتُحسب موظفين مكافئين. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.`;
-  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على متوسط فحص الموظف في الشهر", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء");
-  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم");
+  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على متوسط فحص الموظف في الشهر", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء", "حالة للموظف في الشهر");
+  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم", "صورة في الشهر");
 
   // 2 — Workforce distribution: images, staff and each employee's output per tier.
-  {
-    // Same figures as the workbook's sheet (workforceFigures), so the two cannot drift.
-    const rowsT: TableCell[][] = workforceFigures(w).map((r) => {
+  const workforcePage = (tiers: WorkloadTier[], key: string, basis: string) => {
+    // Same figures as the tier pages and the workbook's sheet (workforceFigures), so they cannot drift.
+    const rowsT: TableCell[][] = workforceFigures(w, tiers).map((r) => {
       const b = (h: string) => (r.selected ? `<b>${h}</b>` : h);
       const cls = (c: string) => (r.selected ? "v-gold" : c);
       return [
@@ -198,15 +207,16 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
     // Level 1 against level 2 for each tier (selected port left out) and the port itself, on the
     // same tier split as the rest of the page.
     const levelGroups = [
-      ...w.tiers.map((t) => { const g = groupTotals(others(t)); return { label: tierName(t), a: { label: "المستوى الأول", value: g.l1PerMonth }, b: { label: "المستوى الثاني", value: g.l2PerMonth } }; }),
+      ...tiers.map((t) => { const g = tierFigures(t.ports); return { label: tierName(t), a: { label: "المستوى الأول", value: g.l1PerMonth }, b: { label: "المستوى الثاني", value: g.l2PerMonth } }; }),
       { label: w.displayName, a: { label: "المستوى الأول", value: sel.l1PerMonth }, b: { label: "المستوى الثاني", value: sel.l2PerMonth } },
     ];
     const maxV = Math.max(1, ...levelGroups.flatMap((g) => [g.a.value ?? 0, g.b.value ?? 0]));
     parts.push(
       slideShell(
-        meta("w2", SEC),
+        meta(key, SEC),
         "",
         `${contentHead({ eyebrow: EYEBROW.w2, title: "أثر توزيع القوى العاملة على الفحص بالأشعة" })}
+<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>
 ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMonth, L.l1Month, L.l2Month], rows: rowsT, compactHeaders: true, rowPx: 50, firstColWidth: 26 })}
 <div class="v3-two-col" style="grid-template-columns:1.2fr .8fr;gap:40px;margin-top:20px">
   ${tintedPanel({ variant: "all", title: `${w.displayName} حسب السنة`, body: dataTable({ headers: ["السنة", L.images, L.imagesMonth, L.staff, L.staffMonth, L.examsMonth, "المستوى الأول", "المستوى الثاني"], rows: rowsY, compactHeaders: true, rowPx: 44, firstColWidth: 14 }) })}
@@ -215,7 +225,9 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
 `,
       ),
     );
-  }
+  };
+  workforcePage(w.tiers, "w2", "بناءً على متوسط فحص الموظف في الشهر");
+  if (w.imageTiers?.length) workforcePage(w.imageTiers, "w2b", "بناءً على عدد الصور في المنافذ");
 
   // 3 — Level 1 and level 2 results by workload tier
   {

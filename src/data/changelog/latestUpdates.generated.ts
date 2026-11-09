@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.9",
+    "date": "2026-11-09",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.9 one method for workforce figures, tier ranges, second workforce slide, employee cut at 10% of the average"
+  },
+  {
     "version": "v160.8",
     "date": "2026-11-09",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "reports",
     "title": "port report tool, one HTML page that turns the raw workbook into the port report"
-  },
-  {
-    "version": "v159.24",
-    "date": "2026-11-07",
-    "bucket": "enhancement",
-    "scope": "reports",
-    "title": "work report email by day, week, month or a picked period, weekends included"
   }
 ];

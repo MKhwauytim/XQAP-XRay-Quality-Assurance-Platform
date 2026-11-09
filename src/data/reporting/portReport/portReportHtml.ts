@@ -27,7 +27,7 @@ import type { ChartTone } from "../executive/deck3/chartKit";
 import { esc, fmtNum } from "../executive/primitives";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../branding/organization";
 import type { AccuracyTier, OutcomeStats, PortReportModel, ScopeSummary } from "./portReportModel";
-import { MIN_TIER_SAMPLE } from "./portReportModel";
+import { employeeMinStudied } from "./portReportModel";
 import { workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
 import { buildPortObservations } from "./portObservations";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
@@ -109,6 +109,7 @@ const W1 = "أثر العبء التشغيلي على المنفذ";
 export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSlideInput): string {
   const footText = `تقرير أعمال ${m.displayName} · ${m.periodLabel}`;
   // Employees below the tiering threshold are left out of the list too, as on the tiers page.
+  const MIN_TIER_SAMPLE = employeeMinStudied(m.employees);
   const staff = m.employees.filter((e) => e.studied >= MIN_TIER_SAMPLE);
   const excluded = m.employees.filter((e) => e.studied < MIN_TIER_SAMPLE);
   const pagesOf = (n: number) => Math.max(1, Math.ceil(n / EMPLOYEE_ROWS_PER_PAGE));
@@ -499,7 +500,7 @@ ${tintedPanel({
       );
     }
   };
-  employeeTables(b("emp"), staff, "s3", A3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم`);
+  employeeTables(b("emp"), staff, "s3", A3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم (10% من متوسط الحالات المدروسة للموظف)`);
 
   // Appendix — employees below the threshold, listed so nobody silently disappears
   if (excluded.length) {
@@ -525,7 +526,7 @@ ${tintedPanel({
   // With workload data: three main sections (العبء التشغيلي، نتائج الدراسة، التوصيات), then the appendices.
   // The year-on-year tier comparison sits in ملحق ب; «أداء المنفذ مقارنة بمستويات العبء» (w4) is left out.
   const order: string[][] = workload
-    ? [b("cover"), b("div1w"), wl("w1"), wl("w1b"), wl("w2"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
+    ? [b("cover"), b("div1w"), wl("w1"), wl("w1b"), wl("w2"), wl("w2b"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
        b("div1"), b("pop"), b("div2"), wl("w5"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("emp"), b("div4"), b("empLow"), b("closing")]
     : [b("cover"), b("gloss"), b("div1"), b("pop"), b("div2"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("tiers"), b("staffVs"), b("emp"), b("div4"), b("empLow"), b("closing")];
   const html = order.flat().join("\n");
@@ -766,6 +767,7 @@ ${svg}${notes.length ? `<p class="v3-note" style="margin:6px 0 0;font-size:18px"
 function tiersInner(m: PortReportModel, eyebrow = S3): string {
   const d = m.distribution;
   const head = contentHead({ eyebrow, title: `معدل التوافق لمنسوبي ${m.displayName}`, note: `المتوسط ${pct(d.mean)} · الوسيط ${pct(d.median)}` });
+  const MIN_TIER_SAMPLE = employeeMinStudied(m.employees);
   if (d.tiers.length === 0) return `${head}<p class="v3-note">لا يوجد موظفون بعدد حالات مدروسة كافٍ (${MIN_TIER_SAMPLE} فأكثر).</p>`;
   const sections = d.tiers
     .map((t, i) => {
@@ -800,7 +802,7 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
     .join("");
   return `${head}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:32px">${sections}</div>
-<p class="v3-note" style="margin-top:8px;font-size:21px">تم احتساب الفئات بناءً على الفرق بين أقل معدل دقة وأعلى معدل دقة مقسومًا على ثلاثة، وكل فئة مقسمة إلى ثلاثة أعمدة. الموظفون المدروسة حالاتهم ${fmtNum(m.employees.length)}: صُنِّف منهم ${fmtNum(d.tiered)} تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم، واستُبعد ${fmtNum(d.untiered)} (في الملحقات).</p>`;
+<p class="v3-note" style="margin-top:8px;font-size:21px">تم احتساب الفئات بناءً على الفرق بين أقل معدل دقة وأعلى معدل دقة مقسومًا على ثلاثة، وكل فئة مقسمة إلى ثلاثة أعمدة. الموظفون المدروسة حالاتهم ${fmtNum(m.employees.length)}: صُنِّف منهم ${fmtNum(d.tiered)} تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم (10% من متوسط الحالات المدروسة للموظف)، واستُبعد ${fmtNum(d.untiered)} (في الملحقات).</p>`;
 }
 
 /** Complete self-contained HTML document for one port. */

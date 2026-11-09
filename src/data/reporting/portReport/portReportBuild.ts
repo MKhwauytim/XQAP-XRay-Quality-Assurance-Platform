@@ -9,7 +9,7 @@ import JSZip from "jszip";
 import { buildPortNameMap } from "../portNameCanonical";
 import { portReportInputFromSheets } from "./portReportSource";
 import type { PortReportInput, PortReportModel } from "./portReportModel";
-import { buildPortReportModel, listReportPorts, STATUS_FALSE_SUSPICION, STATUS_MISSED } from "./portReportModel";
+import { buildPortReportModel, listReportPorts, STATUS_FALSE_SUSPICION, STATUS_MISSED, employeeMinStudied } from "./portReportModel";
 import { buildPortReportHtml } from "./portReportHtml";
 import { buildPortObservations } from "./portObservations";
 import type { PortObservation } from "./portObservations";
@@ -187,6 +187,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   const outcome = (label: string | number, o: O) => [label, o.studied, pct(o.accuracy), o.trueSuspicion, o.trueClear, o.missed, o.falseSuspicion];
   const outcomeHead = ["البند", "المدروسة", "نسبة التوائم", "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ"];
   const employee = (e: PortReportModel["employees"][number]) => [e.code, e.name, e.l1Studied, e.l1Matched, e.l2Studied, e.l2Matched, e.studied, e.matched, e.missed, e.falseSuspicion, pct(e.accuracy)];
+  const minStudied = employeeMinStudied(m.employees);
   const employeeHead = ["الكود", "الموظف", "مدروسة - المستوى الأول", "متوافقة - المستوى الأول", "مدروسة - المستوى الثاني", "متوافقة - المستوى الثاني", "إجمالي المدروسة", "إجمالي المتوافقة", "الاشتباه الفائت", "الاشتباه الخاطئ", "نسبة التوائم"];
   const tierOf = (port: string) => workload.tiers.find((t) => t.ports.some((x) => x.port === port))?.label ?? "";
   const allPorts = workload.tiers.flatMap((t) => t.ports);
@@ -210,8 +211,8 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
       ([[m.displayName, m.selected], ["جميع المنافذ", m.allPorts]] as const).flatMap(([n, sc]) => [[n, ...outcome("المستوى الأول", sc.l1)], [n, ...outcome("المستوى الثاني", sc.l2)]])],
     ["مستويات دقة الموظفين", ["الفئة", "تبدأ من", "تنتهي عند", "عدد الموظفين", "متوسط الدقة", "متوسط الحالات لكل موظف"],
       m.distribution.tiers.map((t) => [t.label, t.from, t.to, t.count, pct(t.meanAccuracy), t.meanStudied === null ? null : Math.round(t.meanStudied)])],
-    ["منسوبي المنفذ (30 فأكثر)", employeeHead, m.employees.filter((e) => e.studied >= 30).map(employee)],
-    ["ملحق - أقل من 30 حالة", employeeHead, m.employees.filter((e) => e.studied < 30).map(employee)],
+    ["منسوبي المنفذ (المصنفون)", employeeHead, m.employees.filter((e) => e.studied >= minStudied).map(employee)],
+    [`ملحق - أقل من ${minStudied} حالة`, employeeHead, m.employees.filter((e) => e.studied < minStudied).map(employee)],
   ];
   const share = (n: number, o: O) => (o.studied ? n / o.studied : null);
   const sc = (label: string, o: O) => [label, o.studied, o.trueSuspicion, o.trueClear, o.missed, o.falseSuspicion, o.matched, pct(o.accuracy), share(o.trueSuspicion, o), share(o.trueClear, o), share(o.missed, o), share(o.falseSuspicion, o)];
@@ -227,6 +228,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   sheets.splice(2 + wlSheets.length, 0,
     ["إجماليات مستويات العبء", ["المستوى", "إجمالي الصور", "متوسط الصور في الشهر", "إجمالي الموظفين المخصصين", "متوسط الموظفين في الشهر"], totals.map((t) => [t.label, t.images, round(t.imagesPerMonth), t.people, round(t.staffPerMonth)])],
     ["القوى العاملة حسب المستوى", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
+    ["القوى العاملة حسب حجم الصور", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload, workload.imageTiers ?? []).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
     ["حدود أثلاث العبء", ["المستوى", "عدد المنافذ", "من (حالة للموظف في الشهر)", "إلى", "متوسط جميع المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]])])],
     ["حدود أثلاث حجم الصور", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المنافذ"], (workload.imageTiers ?? []).map((t) => [t.label, t.ports.length, round(t.from), round(t.to), t.ports.map((p) => p.port).join("، ")])],
     ["مستويات الدقة", ["المستوى", "من", "إلى", "المنافذ", "المدروسة", "نسبة التوائم - الأول", "نسبة التوائم - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.ports.join("، "), g.outcomes.image.studied, pct(g.outcomes.l1.accuracy), pct(g.outcomes.l2.accuracy)])],
@@ -240,7 +242,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
     ["الخط الزمني الشهري", ["الشهر", `نسبة التوائم - ${m.displayName}`, `المدروسة - ${m.displayName}`, "نسبة التوائم - جميع المنافذ", ...m.groups.filter((g) => g.label !== m.group).map((g) => `نسبة التوائم - ${g.label}`)],
       m.monthly.filter((x) => x.selected !== null || x.all !== null).map((x) => [x.monthKey, pct(x.selected), x.selectedStudied, pct(x.all), ...m.groups.filter((g) => g.label !== m.group).map((g) => pct(x.byGroup[g.label] ?? null))])],
     ["المستويان حسب نوع المنفذ", ["نوع المنفذ", "إجابات المستوى الأول", "نسبة التوائم - الأول", "إجابات المستوى الثاني", "نسبة التوائم - الثاني"], m.groups.map((g) => [g.label, g.l1.studied, pct(g.l1.accuracy), g.l2.studied, pct(g.l2.accuracy)])],
-    ["ملخص دقة الموظفين", ["البند", "القيمة"], [["متوسط نسبة التوائم للموظفين", m.distribution.mean], ["الوسيط", m.distribution.median], ["الموظفون المدروسة حالاتهم", m.employees.length], ["المصنفون (30 حالة فأكثر)", m.distribution.tiered], ["المستبعدون (أقل من 30 حالة)", m.distribution.untiered]]],
+    ["ملخص دقة الموظفين", ["البند", "القيمة"], [["متوسط نسبة التوائم للموظفين", m.distribution.mean], ["الوسيط", m.distribution.median], ["الموظفون المدروسة حالاتهم", m.employees.length], ["حد التصنيف (10% من متوسط الحالات المدروسة للموظف)", minStudied], [`المصنفون (${minStudied} حالة فأكثر)`, m.distribution.tiered], [`المستبعدون (أقل من ${minStudied} حالة)`, m.distribution.untiered]]],
     ["توزيع دقة الموظفين", ["الفئة", "تبدأ من", "تنتهي عند", "عدد الموظفين"], m.distribution.bins.map((b) => [m.distribution.tiers.find((t) => t.key === b.tier)?.label ?? b.tier, b.from, b.to, b.count])],
   );
   // Index first: every sheet.

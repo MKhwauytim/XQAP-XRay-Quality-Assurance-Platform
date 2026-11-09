@@ -1,3 +1,4 @@
+import { POOL_SHARE } from "./portWorkloadModel";
 // Port business report — model.
 //
 // A side report: the same visual language as the executive deck (deck2), but
@@ -62,6 +63,17 @@ export const NON_EMPLOYEE_CODES: ReadonlySet<string> = new Set(["X-RAY", "XRAY"]
 
 /** Employees with fewer studied images than this are listed but not tiered. */
 export const MIN_TIER_SAMPLE = 30;
+
+/**
+ * An employee is rated (accuracy tiers, main staff appendix) when their studied images reach
+ * POOL_SHARE of the average employee's, the same rule the workload uses to set apart employees far
+ * below the average (owner's rule, 2026-11-09, replacing the fixed 30).
+ */
+export function employeeMinStudied(employees: readonly { studied: number }[]): number {
+  const v = employees.filter((e) => e.studied > 0);
+  if (!v.length) return 1;
+  return Math.max(1, Math.ceil((POOL_SHARE * v.reduce((a, e) => a + e.studied, 0)) / v.length));
+}
 /** Sub-bins per tier in the distribution chart (3 tiers × 3 = 9 bars). */
 export const SUB_BINS_PER_TIER = 3;
 
@@ -263,7 +275,8 @@ const TIER_LABELS: Record<AccuracyTier["key"], string> = { low: "منخفضة", 
  * chart shows the shape (left/right tail) the three tiers summarize.
  */
 export function buildAccuracyDistribution(employees: readonly EmployeeRow[]): AccuracyDistribution {
-  const eligible = employees.filter((e) => e.studied >= MIN_TIER_SAMPLE && e.accuracy !== null);
+  const minStudied = employeeMinStudied(employees);
+  const eligible = employees.filter((e) => e.studied >= minStudied && e.accuracy !== null);
   const values = eligible.map((e) => e.accuracy as number);
   const untiered = employees.length - eligible.length;
   if (values.length === 0) {
@@ -418,7 +431,9 @@ export function buildPortReportModel(input: PortReportInput, port: string, opts:
 
   const employees = buildEmployeeRows(studies);
   const staffByGroup = groupNames.map((g) => {
-    const rows = buildEmployeeRows(input.studies.filter((r) => r.group === g)).filter((e) => e.studied >= MIN_TIER_SAMPLE && e.accuracy !== null);
+    const all = buildEmployeeRows(input.studies.filter((r) => r.group === g));
+    const minG = employeeMinStudied(all);
+    const rows = all.filter((e) => e.studied >= minG && e.accuracy !== null);
     const acc = rows.map((e) => e.accuracy as number).sort((x, y) => x - y);
     const n = acc.length;
     const sum = (f: (e: EmployeeRow) => number) => rows.reduce((t, e) => t + f(e), 0);

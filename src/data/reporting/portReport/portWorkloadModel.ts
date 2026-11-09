@@ -81,7 +81,12 @@ export const LOAD_YEAR = "2025";
 /** A month counts toward per-employee figures only when this share of its images carries a code. */
 export const RELIABLE_CODE_SHARE = 0.5;
 
+/** Examinations and equivalent employees summed over the counted months (cases per employee = n / eq). */
+export type PoolTotals = { n: number; eq: number };
+
 export type EmployeeLoad = {
+  /** Sums behind the per-employee figures, so groups of ports combine as Σn / Σeq. */
+  pool?: { all: PoolTotals; l1: PoolTotals; l2: PoolTotals };
   /** Codes of the people counted (for tier-level distinct totals). */
   peopleCodes?: string[];
   /** Images that received a level result from an automated-means specialist, in the counted months. */
@@ -149,9 +154,11 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
   const perMonth = ok.map((m) => {
     const all = new Map<string, number>();
     for (const rec of [m.l1, m.l2]) for (const [c, n] of Object.entries(rec)) all.set(c, (all.get(c) ?? 0) + n);
-    const p = pooledMean([...all.values()]);
-    const p1 = pooledMean(Object.values(m.l1));
-    const p2 = pooledMean(Object.values(m.l2));
+    const v = [...all.values()], v1 = Object.values(m.l1), v2 = Object.values(m.l2);
+    const p = pooledMean(v);
+    const p1 = pooledMean(v1);
+    const p2 = pooledMean(v2);
+    const tot = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
     const days = Math.max(1, m.days.length);
     return {
       fte: all.size,
@@ -163,25 +170,35 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
       l1Day: p1.mean === null ? null : p1.mean / days,
       l2Day: p2.mean === null ? null : p2.mean / days,
       days,
+      n: tot(v), eq: p.mean === null ? 0 : p.equivalent,
+      n1: tot(v1), eq1: p1.mean === null ? 0 : p1.equivalent,
+      n2: tot(v2), eq2: p2.mean === null ? 0 : p2.equivalent,
     };
   });
+  // Cases per employee over the period = all examinations ÷ all equivalent employees (owner's
+  // check, 2026-11-09): averaging each month's mean and then weighting levels differently let the
+  // overall figure fall below both levels. As a ratio of sums the overall always sits with its levels.
+  const sumOf = (g: (x: (typeof perMonth)[number]) => number) => perMonth.reduce((a, x) => a + g(x), 0);
+  const pool = { all: { n: sumOf((x) => x.n), eq: sumOf((x) => x.eq) }, l1: { n: sumOf((x) => x.n1), eq: sumOf((x) => x.eq1) }, l2: { n: sumOf((x) => x.n2), eq: sumOf((x) => x.eq2) } };
+  const ratio = (t: PoolTotals) => (t.eq > 0 ? t.n / t.eq : null);
   // Everyone who examined at least one of the port's images in these months.
   const people = new Set<string>();
   for (const m of ok) for (const rec of [m.l1, m.l2]) Object.keys(rec).forEach((c) => people.add(c));
   return {
+    pool,
     peopleCodes: [...people],
     examined: ok.reduce((a, m) => a + m.coded, 0),
     /** Distinct people who examined at least one image here (they may also work elsewhere). */
     employees: people.size,
     employeesPerMonth: mean(perMonth.map((x) => x.fte)),
-    perEmployeeMonth: mean(perMonth.map((x) => x.perEmp)),
+    perEmployeeMonth: ratio(pool.all),
     perEmployeeDay: mean(perMonth.map((x) => (x.perEmp === null ? null : x.perEmp / x.days))),
     l1Employees: mean(perMonth.map((x) => x.fte1)),
     l2Employees: mean(perMonth.map((x) => x.fte2)),
     l1PerDay: mean(perMonth.map((x) => x.l1Day)),
     l2PerDay: mean(perMonth.map((x) => x.l2Day)),
-    l1PerMonth: mean(perMonth.map((x) => x.l1Month)),
-    l2PerMonth: mean(perMonth.map((x) => x.l2Month)),
+    l1PerMonth: ratio(pool.l1),
+    l2PerMonth: ratio(pool.l2),
   };
 }
 
