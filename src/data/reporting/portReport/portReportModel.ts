@@ -9,6 +9,8 @@
 
 /** One studied image (one row of «نتائج الدراسة»). */
 export type PortStudyRow = {
+  /** رقم صورة الاشعة (empty when the sheet has no id column). */
+  id?: string;
   /** المنفذ الموحد */
   port: string;
   /** المجموعة (منفذ جدة / المنافذ البرية / المنافذ البحرية) */

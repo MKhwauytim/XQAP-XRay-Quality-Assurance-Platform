@@ -67,17 +67,31 @@ function level(row: readonly Cell[], code: number, name: number, status: number,
   return { code: str(row[code]), name: str(row[name]), status: s, match: num(row[match]) === 1 };
 }
 
-/** Rows outside the report period («ضمن فترة التقرير» ≠ نعم) are dropped. */
-export function parseStudyRows(rows: Rows): PortStudyRow[] {
+export const STUDY_ID_COLS = ["رقم صورة الاشعة", "رقم صورة الأشعة", "معرف الأشعة", "معرف الاشعة"];
+
+/**
+ * Rows outside the report period («ضمن فترة التقرير» ≠ نعم) are dropped, and the same image id in the same
+ * entry month keeps its first row, so a study counted twice in the sheet counts once.
+ */
+export function parseStudyRows(rows: Rows, stats?: { duplicates: number }): PortStudyRow[] {
   if (rows.length === 0) return [];
   const c = requireCols(rows[0], STUDY_COLS, STUDY_SHEET);
+  const iId = headerIndex(rows[0], STUDY_ID_COLS);
+  const seen = new Set<string>();
   const out: PortStudyRow[] = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     const port = str(r[c.port]);
     if (!port || str(r[c.inPeriod]) !== "نعم") continue;
+    const id = iId >= 0 ? str(r[iId]) : "";
+    if (id) {
+      const k = id + "|" + str(r[c.month]);
+      if (seen.has(k)) { if (stats) stats.duplicates++; continue; }
+      seen.add(k);
+    }
     const y = num(r[c.year]);
     out.push({
+      ...(id ? { id } : {}),
       port,
       group: str(r[c.group]),
       year: y > 0 ? y : null,

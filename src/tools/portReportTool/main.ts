@@ -24,6 +24,8 @@ const portSelect = $<HTMLSelectElement>("port");
 const nameInput = $<HTMLInputElement>("name");
 const yearsBox = $<HTMLDivElement>("years");
 const lastMonthSelect = $<HTMLSelectElement>("last-month");
+const transitField = $<HTMLElement>("transit-field");
+const excludeTransit = $<HTMLInputElement>("exclude-transit");
 const periodInput = $<HTMLInputElement>("period");
 const status = $<HTMLParagraphElement>("status");
 const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-out]"));
@@ -108,7 +110,10 @@ function readFile(file: File): void {
       setStatus(`تعذرت قراءة الملف: ${m.message}`, "error");
       return;
     }
-    data = { studyRows: m.read.studyRows, workloadMonths: m.read.workload.months };
+    const wl = m.read.workload;
+    data = { studyRows: m.read.studyRows, workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds };
+    transitField.hidden = !wl.transitIds?.length;
+    excludeTransit.checked = false;
     progressBar.style.width = "100%";
     progressText.textContent = `تمت قراءة الملف: ${m.read.studyRows.length.toLocaleString("en")} صف في «نتائج الدراسة»، و${m.read.workload.sheets.length} أوراق للمجتمع.`;
     showOptions(data);
@@ -133,12 +138,14 @@ function build(): PortReportBuild {
     period: periodInput.value.trim() || periodText(),
     lastMonth: lastMonthSelect.value || undefined,
     excludeYears: allYears.filter((y) => !chosen.has(y)),
+    excludeTransit: excludeTransit.checked,
   });
 }
 
 function baseName(r: PortReportBuild): string {
   const without = Array.from(yearsBox.querySelectorAll<HTMLInputElement>("input:not(:checked)")).map((i) => i.value);
-  return `تقرير أعمال ${r.model.displayName}${without.length ? ` - بدون ${without.join(" و")}` : ""}`;
+  const parts = [...without, ...(excludeTransit.checked ? ["ترانزيت"] : [])];
+  return `تقرير أعمال ${r.model.displayName}${parts.length ? ` - بدون ${parts.join(" و")}` : ""}`;
 }
 
 /** Opens the report in a new tab and starts the print dialog there; «حفظ كملف PDF» saves it with the Somar font. */

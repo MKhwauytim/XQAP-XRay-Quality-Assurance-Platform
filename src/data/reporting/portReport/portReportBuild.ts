@@ -39,6 +39,8 @@ export type PortReportOptions = {
   lastMonth?: string;
   /** Whole years left out of the report (population, workload and study rows). */
   excludeYears?: readonly string[];
+  /** Leave transit declarations («البيان» = ترانزيت) out: population, workload and study rows. */
+  excludeTransit?: boolean;
 };
 
 export type PortReportData = {
@@ -46,6 +48,10 @@ export type PortReportData = {
   studyRows: Rows;
   /** The year / quarter population sheets, aggregated (workloadAggregate.ts). */
   workloadMonths: readonly WorkloadMonth[];
+  /** The same months without transit images (workloadAggregate's `monthsNoTransit`). */
+  workloadMonthsNoTransit?: readonly WorkloadMonth[];
+  /** Image ids of transit declarations (workloadAggregate's `transitIds`). */
+  transitIds?: readonly string[];
 };
 
 /** Canonical port name lookup over both sources, so «ميناء جده الاسلامي» and «ميناء جدة الإسلامي» are one port. */
@@ -108,11 +114,20 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   for (const r of input.studies) r.port = canon(r.port);
   input.studies = input.studies.filter((r) => (r.year === null || String(r.year) >= FIRST_REPORT_YEAR) && (!r.monthKey || inReportYears(r.monthKey)));
   const excludeYears = new Set(opts.excludeYears ?? []);
-  if (excludeYears.size) input.studies = input.studies.filter((r) => r.year === null || !excludeYears.has(String(r.year)));
-  const months = data.workloadMonths
+  // A year left out goes by the capture year and, when it is missing, by the entry month.
+  if (excludeYears.size) input.studies = input.studies.filter((r) => !excludeYears.has(r.year === null ? r.monthKey.slice(0, 4) : String(r.year)));
+  if (opts.excludeTransit && data.transitIds?.length) {
+    const transit = new Set(data.transitIds);
+    input.studies = input.studies.filter((r) => !r.id || !transit.has(r.id));
+  }
+  const source = opts.excludeTransit && data.workloadMonthsNoTransit ? data.workloadMonthsNoTransit : data.workloadMonths;
+  const months = source
     .filter((x) => inReportYears(x.month) && (!opts.lastMonth || x.month <= opts.lastMonth) && !excludeYears.has(x.month.slice(0, 4)))
     .map((x) => ({ ...x, port: canon(x.port) }));
-  const portWorkloads = buildPortWorkloads(months);
+  // Staff and workload are measured on LOAD_YEAR, or on the report's latest year when LOAD_YEAR is left out.
+  const monthYears = [...new Set(months.map((x) => x.month.slice(0, 4)))].sort();
+  const loadYear = monthYears.includes(LOAD_YEAR) ? LOAD_YEAR : monthYears.at(-1) ?? LOAD_YEAR;
+  const portWorkloads = buildPortWorkloads(months, loadYear);
   const tiers = buildWorkloadTiers(portWorkloads);
   const port = canon(opts.port);
   const outcomes = { selected: outcomesFor(input.studies, new Set([port])) } as Record<"selected" | WorkloadTierKey, LevelOutcomes>;
@@ -123,7 +138,7 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
     tiers,
     outcomes,
     yearly: outcomesByYear(input.studies, port, tiers),
-    loadYear: LOAD_YEAR,
+    loadYear,
     periodLabel: opts.period,
     unrated: unratedPorts(portWorkloads),
   } as WorkloadSlideInput;

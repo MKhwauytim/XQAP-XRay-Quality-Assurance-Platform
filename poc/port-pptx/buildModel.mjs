@@ -47,7 +47,7 @@ try {
   const studyRows = XLSX.utils.sheet_to_json(wb.Sheets[src.STUDY_SHEET], { header: 1, raw: true, defval: null });
   const wl = JSON.parse(readFileSync(cachePath, "utf8"));
   const excludeYears = (flag("exclude-years") ?? "").split(",").map((y) => y.trim()).filter(Boolean);
-  const r = build.buildPortReport({ studyRows, workloadMonths: wl.months }, { port: port ?? "", displayName, period, lastMonth: flag("last-month"), excludeYears });
+  const r = build.buildPortReport({ studyRows, workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds }, { port: port ?? "", displayName, period, lastMonth: flag("last-month"), excludeYears, excludeTransit: args.includes("--exclude-transit") });
   const { model: m, workload } = r;
   writeFileSync(join(outDir, "model.json"), JSON.stringify({ m, workload }));
   writeFileSync(join(outDir, "report.html"), r.html, "utf8");

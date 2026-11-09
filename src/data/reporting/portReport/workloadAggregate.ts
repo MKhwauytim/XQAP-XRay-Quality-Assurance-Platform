@@ -15,14 +15,27 @@
 //   2026-Q1..Q4 : a summary row first; the real header is the row holding
 //                 «رقم صورة الاشعة». «كود موظف المستوى الأول/الثاني» are codes.
 //   Q4B         : «كود موظف المستوى الأول/الثاني» codes.
-// An image id seen in an earlier sheet is skipped, so each image counts once.
+// A row repeating an image id in the same month is skipped, so each image counts once.
+// Transit: the 2026 sheets carry «البيان» («ترانزيت» for transit declarations).
+// Every month is counted twice in the same pass, with and without transit
+// images, and the transit image ids are kept so the study rows can drop them too.
 
 import type { WorkloadMonthInput } from "./portWorkloadModel";
 
-export type WorkloadSheetReport = { name: string; rows: number; coded: number; duplicates: number };
+export type WorkloadSheetReport = { name: string; rows: number; coded: number; duplicates: number; transit: number };
 /** A month's workload plus the images either level flagged «اشتباه». */
 export type WorkloadMonth = WorkloadMonthInput & { suspicion: number };
-export type WorkloadRead = { months: WorkloadMonth[]; sheets: WorkloadSheetReport[] };
+export type WorkloadRead = {
+  months: WorkloadMonth[];
+  /** The same months with transit images left out (equal to `months` when no sheet carries «البيان»). */
+  monthsNoTransit?: WorkloadMonth[];
+  /** Image ids of transit declarations. */
+  transitIds?: string[];
+  sheets: WorkloadSheetReport[];
+};
+
+/** «البيان» = ترانزيت marks a transit declaration. */
+export const isTransitDeclaration = (v: unknown): boolean => String(v ?? "").includes("ترانزيت");
 
 const ID = ["معرف الأشعة", "معرف الاشعة", "رقم صورة الاشعة"];
 const DATE = ["تاريخ دخول الأشعة", "تاريخ دخول الاشعة", "تاريخ دخول للاشعة", "تاريخ الاشعة"];
@@ -32,6 +45,8 @@ const CODE1 = ["كود موظف المستوى الأول"];
 const CODE2 = ["كود موظف المستوى الثاني"];
 const CODE1_2025 = ["موظف المستوى الاول", "موظف المستوى الأول"];
 const CODE2_2025 = ["موظف المستوى الثاني"];
+/** «اشتباه», «إشتباة», «اشتباه-فحص يدوي», «نتيجة اشتباه -مبدئي». */
+const SUSPICION = /[اإ]شتبا[هة]/;
 /** Result codes that are a system, not a person. */
 const NON_EMPLOYEE = new Set(["X-RAY", "XRAY"]);
 
@@ -57,12 +72,14 @@ export function dayOf(v: unknown): string {
 }
 
 type Acc = { port: string; type: string; month: string; images: number; suspicion: number; coded: number; days: Set<string>; l1: Map<string, number>; l2: Map<string, number> };
-type Cols = { id?: string; date?: string; port?: string; type?: string; c1?: string; c2?: string; r1?: string; r2?: string };
+type Cols = { id?: string; date?: string; port?: string; type?: string; c1?: string; c2?: string; r1?: string; r2?: string; decl?: string };
 
 /** Feed each sheet's rows in order; `result()` returns the months and a per-sheet report. */
 export function createWorkloadAggregator() {
   const seen = new Set<string>();
   const acc = new Map<string, Acc>();
+  const accNoTransit = new Map<string, Acc>();
+  const transitIds: string[] = [];
   const report: WorkloadSheetReport[] = [];
   let sheet: WorkloadSheetReport | null = null;
   let col: Cols | null = null;
@@ -70,7 +87,7 @@ export function createWorkloadAggregator() {
 
   return {
     startSheet(name: string): void {
-      sheet = { name, rows: 0, coded: 0, duplicates: 0 };
+      sheet = { name, rows: 0, coded: 0, duplicates: 0, transit: 0 };
       report.push(sheet);
       col = null;
       is2025 = /^2025/.test(name);
@@ -81,42 +98,51 @@ export function createWorkloadAggregator() {
         // The header is the first row holding the image id column.
         if (!Object.values(cells).some((v) => ID.includes(String(v).trim()))) return;
         const f = (hs: string[]) => Object.keys(cells).find((k) => hs.includes(String(cells[k]).trim()));
-        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE1_2025 : CODE1), c2: f(is2025 ? CODE2_2025 : CODE2), r1: f(RES1), r2: f(RES2) };
+        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE1_2025 : CODE1), c2: f(is2025 ? CODE2_2025 : CODE2), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
         return;
       }
       const at = (k?: string) => (k ? cells[k] : undefined);
       const id = clean(at(col.id));
-      if (id) {
-        if (seen.has(id)) { sheet.duplicates++; return; }
-        seen.add(id);
-      }
       const port = clean(at(col.port));
       const day = dayOf(at(col.date));
       if (!port || !day) return;
-      sheet.rows++;
-      const key = `${port}|${day.slice(0, 7)}`;
-      let a = acc.get(key);
-      if (!a) {
-        a = { port, type: clean(at(col.type)), month: day.slice(0, 7), images: 0, suspicion: 0, coded: 0, days: new Set(), l1: new Map(), l2: new Map() };
-        acc.set(key, a);
+      // All sheets are read as one table: a duplicate is the same image id in the same month
+      // (owner's rule, 2026-11-09). Each row then counts in the month of its own date, whichever sheet holds it.
+      if (id) {
+        const k = id + '|' + day.slice(0, 7);
+        if (seen.has(k)) { sheet.duplicates++; return; }
+        seen.add(k);
       }
-      a.images++;
-      // An image is «اشتباه» when either level flagged it.
-      if (clean(at(col.r1)) === "اشتباه" || clean(at(col.r2)) === "اشتباه") a.suspicion++;
-      a.days.add(day);
+      sheet.rows++;
+      const transit = isTransitDeclaration(at(col.decl));
+      if (transit) { sheet.transit++; if (id) transitIds.push(id); }
       const c1 = clean(at(col.c1));
       const c2 = clean(at(col.c2));
       const ok1 = c1 !== "" && !NON_EMPLOYEE.has(c1.toUpperCase());
       const ok2 = c2 !== "" && !NON_EMPLOYEE.has(c2.toUpperCase());
-      if (ok1 || ok2) { a.coded++; sheet.coded++; }
-      // Per-employee image counts, so an employee working several ports can be
-      // apportioned by their share of each port's work.
-      if (ok1) a.l1.set(c1, (a.l1.get(c1) ?? 0) + 1);
-      if (ok2) a.l2.set(c2, (a.l2.get(c2) ?? 0) + 1);
+      if (ok1 || ok2) sheet.coded++;
+      // An image is «اشتباه» when either level flagged it (2026 writes «نتيجة اشتباه -مبدئي»).
+      const suspicious = SUSPICION.test(clean(at(col.r1))) || SUSPICION.test(clean(at(col.r2)));
+      const key = `${port}|${day.slice(0, 7)}`;
+      for (const m of transit ? [acc] : [acc, accNoTransit]) {
+        let a = m.get(key);
+        if (!a) {
+          a = { port, type: clean(at(col.type)), month: day.slice(0, 7), images: 0, suspicion: 0, coded: 0, days: new Set(), l1: new Map(), l2: new Map() };
+          m.set(key, a);
+        }
+        a.images++;
+        if (suspicious) a.suspicion++;
+        a.days.add(day);
+        if (ok1 || ok2) a.coded++;
+        // Per-employee image counts, so an employee working several ports can be
+        // apportioned by their share of each port's work.
+        if (ok1) a.l1.set(c1, (a.l1.get(c1) ?? 0) + 1);
+        if (ok2) a.l2.set(c2, (a.l2.get(c2) ?? 0) + 1);
+      }
     },
     result(): WorkloadRead {
-      const months = [...acc.values()].map((a): WorkloadMonth => ({ ...a, days: [...a.days], l1: Object.fromEntries(a.l1), l2: Object.fromEntries(a.l2) }));
-      return { months, sheets: report };
+      const out = (m: Map<string, Acc>) => [...m.values()].map((a): WorkloadMonth => ({ ...a, days: [...a.days], l1: Object.fromEntries(a.l1), l2: Object.fromEntries(a.l2) }));
+      return { months: out(acc), monthsNoTransit: out(accNoTransit), transitIds, sheets: report };
     },
   };
 }

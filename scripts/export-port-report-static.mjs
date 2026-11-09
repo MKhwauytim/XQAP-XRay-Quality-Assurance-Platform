@@ -68,14 +68,15 @@ try {
     const wl = cachePath && existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : await readWorkload(resolve(workloadPath), agg.createWorkloadAggregator);
     if (cachePath && wl && !existsSync(cachePath)) writeFileSync(cachePath, JSON.stringify(wl));
     if (!wl) throw new Error(`no year/quarter population sheets in ${workloadPath}`);
-    for (const s of wl.sheets) console.log(`  ${s.name}: ${s.rows} images, ${s.coded} with employee codes, ${s.duplicates} repeated ids skipped`);
-    const data = { studyRows: sheets[src.STUDY_SHEET], workloadMonths: wl.months };
+    for (const s of wl.sheets) console.log(`  ${s.name}: ${s.rows} images, ${s.coded} with employee codes, ${s.duplicates} repeated ids skipped, ${s.transit ?? 0} transit`);
+    const data = { studyRows: sheets[src.STUDY_SHEET], workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds };
     if (!port) {
       console.log("ports:\n  " + build.listPortsInData(data).join("\n  "));
     } else {
       // --last-month=YYYY-MM drops rows dated after the report period; --exclude-years=2024[,…] leaves whole years out.
       const excludeYears = (flag("exclude-years") ?? "").split(",").map((y) => y.trim()).filter(Boolean);
-      const r = build.buildPortReport(data, { port, displayName, period, lastMonth: flag("last-month"), excludeYears });
+      // --exclude-transit leaves transit declarations («البيان» = ترانزيت) out.
+      const r = build.buildPortReport(data, { port, displayName, period, lastMonth: flag("last-month"), excludeYears, excludeTransit: args.includes("--exclude-transit") });
       mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(outPath, r.html, "utf8");
       const m = r.model;

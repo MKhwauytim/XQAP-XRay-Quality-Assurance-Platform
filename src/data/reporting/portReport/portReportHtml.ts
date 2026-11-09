@@ -676,7 +676,9 @@ const TIER_TONE: Record<AccuracyTier["key"], ChartTone> = { low: "red", mid: "go
  * because shipments run in the tens of thousands and the errors in the tens.
  */
 function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string {
-  const months = (w.monthlyCounts ?? []).filter((x) => x.images !== null);
+  // Every month with studied images or received images; a month missing from the population sheets
+  // leaves a gap in the received line instead of hiding that month's errors.
+  const months = w.monthlyCounts ?? [];
   const head = contentHead({ eyebrow: S2, title: `الحالات الواردة والاشتباهات الفائتة والخاطئة شهرياً`, note: m.displayName });
   if (months.length < 2) return `${head}<p class="v3-note">لا توجد أشهر كافية لرسم الخط الزمني.</p>`;
   const W = 1760, padL = 40, padR = 170;
@@ -696,22 +698,23 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
     grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vb))}</text>`);
   }
   const series = [
-    { label: "الحالات الواردة", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images ?? 0), chipDy: -24 },
-    { label: "الاشتباهات الفائتة", color: "var(--v3-red)", y: yB, values: months.map((x0) => x0.missed), chipDy: -24 },
-    { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, y: yB, values: months.map((x0) => x0.falseSuspicion), chipDy: 26 },
+    { label: "الحالات الواردة", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images) as (number | null)[], chipDy: -24 },
+    { label: "الاشتباهات الفائتة", color: "var(--v3-red)", y: yB, values: months.map((x0) => x0.missed) as (number | null)[], chipDy: -24 },
+    { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, y: yB, values: months.map((x0) => x0.falseSuspicion) as (number | null)[], chipDy: 26 },
   ];
   const chip = (cx: number, cy: number, text: string, color: string, wpx: number) =>
     `<rect x="${(cx - wpx / 2).toFixed(1)}" y="${(cy - 13).toFixed(1)}" width="${wpx}" height="26" rx="5" fill="${color}"/><text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="16" font-weight="700" fill="var(--v3-bg)">${text}</text>`;
   const lines = series
     .map((ser, si) => {
-      const d = ser.values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${ser.y(v).toFixed(1)}`).join(" ");
-      const dots = ser.values.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${ser.y(v).toFixed(1)}" r="5" fill="${ser.color}"/>`).join("");
+      const d = ser.values.map((v, i) => (v === null ? "" : `${i && ser.values[i - 1] !== null ? "L" : "M"}${x(i).toFixed(1)},${ser.y(v).toFixed(1)}`)).join(" ");
+      const dots = ser.values.map((v, i) => (v === null ? "" : `<circle cx="${x(i).toFixed(1)}" cy="${ser.y(v).toFixed(1)}" r="5" fill="${ser.color}"/>`)).join("");
       const chips = ser.values
         .map((v, i) => {
+          if (v === null) return "";
           // The higher of the two error counts gets its chip above its point, the lower one below,
           // so neither chip covers the other line.
           let dy = ser.chipDy;
-          if (si > 0) { const other = series[si === 1 ? 2 : 1].values[i]; dy = v >= other ? -24 : 26; if (v === other && si === 2) dy = 26; }
+          if (si > 0) { const other = series[si === 1 ? 2 : 1].values[i] ?? 0; dy = v >= other ? -24 : 26; if (v === other && si === 2) dy = 26; }
           const t = fmtNum(v);
           return chip(x(i), ser.y(v) + dy, t, ser.color, Math.max(40, 12 + t.length * 10));
         })
@@ -738,9 +741,10 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
     })
     .join("");
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="الخط الزمني للحالات الواردة (إرساليات) والاشتباهات" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, "الحالات الواردة (جميع الصور)")}${bandTitle(botT - 14, "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)")}${lines}${monthLabels}</svg>`;
-  const total = (vals: number[]) => vals.reduce((a0, b0) => a0 + b0, 0);
+  const known = (vals: (number | null)[]) => vals.filter((v): v is number => v !== null);
+  const total = (vals: (number | null)[]) => known(vals).reduce((a0, b0) => a0 + b0, 0);
   const legend = series
-    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">الإجمالي ${fmtNum(total(ser.values))} · المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / months.length))}</span></div>`)
+    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">الإجمالي ${fmtNum(total(ser.values))} · المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / Math.max(1, known(ser.values).length)))}</span></div>`)
     .join("");
   // Source caveats, detected from the figures: months before any missed suspicion was recorded, and
   // months whose received images are under half the median month (an incomplete population sheet).
@@ -748,9 +752,11 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
   const notes: string[] = [];
   const firstMissed = months.findIndex((x0) => x0.missed > 0);
   if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${mLabel(months[firstMissed].monthKey)}.`);
-  const sortedImg = months.map((x0) => x0.images ?? 0).sort((a0, b0) => a0 - b0);
-  const median = sortedImg[Math.floor(sortedImg.length / 2)];
-  const thin = months.filter((x0) => (x0.images ?? 0) < median / 2).map((x0) => mLabel(x0.monthKey));
+  const missing = months.filter((x0) => x0.images === null).map((x0) => mLabel(x0.monthKey));
+  if (missing.length) notes.push(`لا توجد حالات واردة في ملف المجتمع لشهر ${missing.join("، ")}.`);
+  const sortedImg = known(months.map((x0) => x0.images)).sort((a0, b0) => a0 - b0);
+  const median = sortedImg[Math.floor(sortedImg.length / 2)] ?? 0;
+  const thin = months.filter((x0) => x0.images !== null && x0.images < median / 2).map((x0) => mLabel(x0.monthKey));
   if (thin.length) notes.push(`الحالات الواردة في ${thin.join("، ")} أقل من نصف الشهر المعتاد في ملف المجتمع، ويُرجّح أن بيانات تلك الأشهر غير مكتملة في المصدر.`);
   return `${head}
 <div style="display:flex;flex-wrap:wrap;gap:10px 48px;margin-bottom:10px">${legend}</div>

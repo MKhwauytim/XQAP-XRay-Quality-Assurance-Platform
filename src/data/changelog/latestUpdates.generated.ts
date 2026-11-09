@@ -5,6 +5,41 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.7",
+    "date": "2026-11-09",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "v160.7 one report per year, transit on or off, duplicates are the same image id in the same month"
+  },
+  {
+    "version": "v160.6",
+    "date": "2026-11-08",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "live slide numbers in PowerPoint, correct-result columns removed, panels aligned"
+  },
+  {
+    "version": "v160.5",
+    "date": "2026-11-08",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "pooled staff average, tiers in thirds, size tiers and accuracy groups"
+  },
+  {
+    "version": "v160.4",
+    "date": "2026-11-08",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "2024 removed from the report entirely"
+  },
+  {
+    "version": "v160.3",
+    "date": "2026-11-08",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "three main sections and a monthly shipments and errors timeline"
+  },
+  {
     "version": "v160.2",
     "date": "2026-11-08",
     "bucket": "enhancement",
@@ -38,40 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "feature",
     "scope": "reports",
     "title": "weekly work report email next to the daily one"
-  },
-  {
-    "version": "v159.22",
-    "date": "2026-11-07",
-    "bucket": "fix",
-    "scope": "reports",
-    "title": "deck viewer no longer scrolls sideways; port report notes removed"
-  },
-  {
-    "version": "v159.21",
-    "date": "2026-11-07",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "observations in the executive report's format, one type size"
-  },
-  {
-    "version": "v159.20",
-    "date": "2026-11-07",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "executive report exports an editable PowerPoint file"
-  },
-  {
-    "version": "v159.19",
-    "date": "2026-11-07",
-    "bucket": "feature",
-    "scope": "deck3",
-    "title": "automated الملاحظات والتوصيات from data-triggered observation types"
-  },
-  {
-    "version": "v159.18",
-    "date": "2026-11-07",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "daily work report email across all months"
   }
 ];

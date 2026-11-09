@@ -109,6 +109,8 @@ export type PortWorkload = EmployeeLoad & {
   imagesPerMonth: number;
   codedShare: number | null;
   years: PortWorkloadYear[];
+  /** The year the staff and workload are measured on (LOAD_YEAR, or the report's own year when it covers one year). */
+  loadYear?: string;
 };
 
 export type WorkloadTierKey = "low" | "mid" | "high";
@@ -184,7 +186,7 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
 }
 
 /** Group monthly rows into one PortWorkload per (already canonical) port name. */
-export function buildPortWorkloads(input: readonly WorkloadMonthInput[]): PortWorkload[] {
+export function buildPortWorkloads(input: readonly WorkloadMonthInput[], loadYear: string = LOAD_YEAR): PortWorkload[] {
   // Every employee counts, even with one case (owner's rule, 2026-11-08); low-volume
   // employees are handled by pooledMean in each month instead of being dropped.
   const months = input;
@@ -217,7 +219,7 @@ export function buildPortWorkloads(input: readonly WorkloadMonthInput[]): PortWo
     const typeCount = new Map<string, number>();
     for (const m of ms) if (m.type) typeCount.set(m.type, (typeCount.get(m.type) ?? 0) + m.images);
     const type = [...typeCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-    return { port, type, images, months: monthKeys.size, imagesPerMonth: images / Math.max(1, monthKeys.size), codedShare: images ? coded / images : null, years, ...employeeLoad(ms, totals, ms.some((m) => m.month.startsWith(LOAD_YEAR)) ? LOAD_YEAR : undefined) };
+    return { port, type, images, months: monthKeys.size, imagesPerMonth: images / Math.max(1, monthKeys.size), codedShare: images ? coded / images : null, years, loadYear, ...employeeLoad(ms, totals, ms.some((m) => m.month.startsWith(loadYear)) ? loadYear : undefined) };
   });
 }
 
@@ -233,7 +235,7 @@ export const MIN_PORT_IMAGES_PER_DAY = 10;
 
 /** Images a month in the load year (the year the staff and workload are measured on). */
 export const loadImagesPerMonth = (p: PortWorkload): number | null => {
-  const y = p.years.find((x) => String(x.year) === LOAD_YEAR);
+  const y = p.years.find((x) => String(x.year) === (p.loadYear ?? LOAD_YEAR));
   return y ? y.images / Math.max(1, y.months) : null;
 };
 
