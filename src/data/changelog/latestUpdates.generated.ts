@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.10",
+    "date": "2026-11-09",
+    "bucket": "fix",
+    "scope": "pptx",
+    "title": "v160.10 svg charts keep their colours in the port tool's PowerPoint"
+  },
+  {
     "version": "v160.9",
     "date": "2026-11-09",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "reports",
     "title": "PowerPoint and Excel use the Somar font names; the port tool leaves 2024 out by default"
-  },
-  {
-    "version": "v160.0",
-    "date": "2026-11-08",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "port report tool, one HTML page that turns the raw workbook into the port report"
   }
 ];
