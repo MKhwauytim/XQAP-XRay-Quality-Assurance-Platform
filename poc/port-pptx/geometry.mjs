@@ -115,7 +115,7 @@ function probe() {
         } else out.images.push({ ...b, src: el.src });
         return;
       }
-      if ((tag === "svg" || tag === "SVG") && /إرساليات/.test(el.getAttribute("aria-label") ?? "")) {
+      if ((tag === "svg" || tag === "SVG") && (el.hasAttribute("data-pptx-image") || /إرساليات/.test(el.getAttribute("aria-label") ?? ""))) {
         // The monthly counts chart has no native PowerPoint rebuild: it goes in as an svg image,
         // with the theme colours and the font resolved (an image cannot read the page's CSS variables).
         const b = box(el.getBoundingClientRect());

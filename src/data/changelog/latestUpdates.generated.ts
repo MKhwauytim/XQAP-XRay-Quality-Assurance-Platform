@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.12",
+    "date": "2026-11-10",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "v160.12 PowerPoint text in Somar Medium, staff-load tier slides labelled by port image volume"
+  },
+  {
     "version": "v160.11",
     "date": "2026-11-09",
     "bucket": "enhancement",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "port report",
     "title": "three main sections and a monthly shipments and errors timeline"
-  },
-  {
-    "version": "v160.2",
-    "date": "2026-11-08",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "workforce slide compares cases per employee per month by level"
   }
 ];

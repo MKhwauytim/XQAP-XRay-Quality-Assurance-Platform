@@ -8,8 +8,8 @@ import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { buildPortNameMap } from "../portNameCanonical";
 import { portReportInputFromSheets } from "./portReportSource";
-import type { PortReportInput, PortReportModel } from "./portReportModel";
-import { buildPortReportModel, listReportPorts, STATUS_FALSE_SUSPICION, STATUS_MISSED, employeeMinStudied } from "./portReportModel";
+import type { OutcomeStats, PortReportInput, PortReportModel } from "./portReportModel";
+import { buildEmployeeRows, buildPortReportModel, employeeMinStudied, listReportPorts, NON_EMPLOYEE_CODES, STATUS_FALSE_SUSPICION, STATUS_MISSED } from "./portReportModel";
 import { buildPortReportHtml } from "./portReportHtml";
 import { buildPortObservations } from "./portObservations";
 import type { PortObservation } from "./portObservations";
@@ -85,27 +85,52 @@ export type PortReportBuild = {
   observations: PortObservation[];
 };
 
-/** Ports with at least this many studied images are placed in an accuracy group. */
-const MIN_GROUP_STUDIED = 30;
-
-/** Ports (selected one excluded) ranked by نسبة التوائم and cut into thirds of equal size. */
+/**
+ * Employees of the other ports (selected port excluded) in three accuracy groups, by the same rule as
+ * the selected port's own staff (buildAccuracyDistribution): only employees reaching employeeMinStudied,
+ * equal-width ranges = (highest − lowest نسبة التوائم) ÷ 3. Each group's level-1 / level-2 outcomes are
+ * the answers its employees gave at that level.
+ */
 function accuracyGroups(studies: PortReportInput["studies"], selected: string): NonNullable<WorkloadSlideInput["accuracyGroups"]> {
-  const acc = new Map<string, [number, number]>();
-  for (const r of studies) {
-    if (r.port === selected) continue;
-    const v = acc.get(r.port) ?? [0, 0];
-    v[0] += 1;
-    if (r.imageMatch) v[1] += 1;
-    acc.set(r.port, v);
+  const other = studies.filter((r) => r.port !== selected);
+  const rated = buildEmployeeRows(other);
+  const minStudied = employeeMinStudied(rated);
+  const eligible = rated.filter((e) => e.studied >= minStudied && e.accuracy !== null);
+  const values = eligible.map((e) => e.accuracy as number);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const width = (max - min) / 3;
+  const tierOf = new Map(eligible.map((e) => [e.code, width === 0 ? 0 : Math.min(2, Math.floor(((e.accuracy as number) - min) / width))]));
+  const empty = (): OutcomeStats => ({ studied: 0, trueSuspicion: 0, falseSuspicion: 0, missed: 0, trueClear: 0, matched: 0, accuracy: null });
+  const groups = [0, 1, 2].map(() => ({ image: empty(), l1: empty(), l2: empty(), n: 0, acc: 0 }));
+  for (const e of eligible) { const g = groups[tierOf.get(e.code) as number]; g.n += 1; g.acc += e.accuracy as number; }
+  const add = (o: OutcomeStats, status: string, match: boolean) => {
+    o.studied++;
+    if (match) o.matched++;
+    if (status === "اشتباه صحيح") o.trueSuspicion++;
+    else if (status === STATUS_FALSE_SUSPICION) o.falseSuspicion++;
+    else if (status === STATUS_MISSED) o.missed++;
+    else if (status === "سليمة صحيحة") o.trueClear++;
+  };
+  for (const r of other) {
+    for (const [lvl, key] of [[r.l1, "l1"], [r.l2, "l2"]] as const) {
+      const t = lvl ? tierOf.get(lvl.code) : undefined;
+      if (!lvl || t === undefined) continue;
+      add(groups[t][key], lvl.status, lvl.match);
+      add(groups[t].image, lvl.status, lvl.match); // both levels' answers together
+    }
   }
-  const ranked = [...acc].filter(([, [n]]) => n >= MIN_GROUP_STUDIED).map(([p, [n, ok]]) => ({ p, a: ok / n })).sort((x, y) => x.a - y.a || x.p.localeCompare(y.p));
-  const n = ranked.length;
-  const cuts = [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+  for (const g of groups) for (const o of [g.image, g.l1, g.l2]) o.accuracy = o.studied ? o.matched / o.studied : null;
   const labels = ["منخفضة", "متوسطة", "عالية"];
-  return (["low", "mid", "high"] as const).map((key, i) => {
-    const g = ranked.slice(cuts[i], cuts[i + 1]);
-    return { key, label: labels[i], ports: g.map((x) => x.p), from: g[0]?.a ?? null, to: g[g.length - 1]?.a ?? null, outcomes: outcomesFor(studies, new Set(g.map((x) => x.p))) };
-  });
+  return (["low", "mid", "high"] as const).map((key, i) => ({
+    key,
+    label: labels[i],
+    employees: groups[i].n,
+    meanAccuracy: groups[i].n ? groups[i].acc / groups[i].n : null,
+    from: values.length ? min + width * i : null,
+    to: values.length ? (i === 2 ? max : min + width * (i + 1)) : null,
+    outcomes: { image: groups[i].image, l1: groups[i].l1, l2: groups[i].l2 },
+  }));
 }
 
 export function buildPortReport(data: PortReportData, opts: PortReportOptions): PortReportBuild {
@@ -142,13 +167,24 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
     periodLabel: opts.period,
     unrated: unratedPorts(portWorkloads),
   } as WorkloadSlideInput;
-  // Monthly counts for the selected port: all images received, and the studied images per error.
-  const mc = new Map<string, { monthKey: string; images: number | null; missed: number; falseSuspicion: number }>();
-  const mcAt = (k: string) => { let v = mc.get(k); if (!v) { v = { monthKey: k, images: null, missed: 0, falseSuspicion: 0 }; mc.set(k, v); } return v; };
-  for (const x of months) if (x.port === port) { const v = mcAt(x.month); v.images = (v.images ?? 0) + x.images; }
+  // Monthly counts for the selected port: images received, images studied, and the studied images per error.
+  const mc = new Map<string, { monthKey: string; images: number | null; employees: number | null; studied: number; missed: number; falseSuspicion: number }>();
+  const mcAt = (k: string) => { let v = mc.get(k); if (!v) { v = { monthKey: k, images: null, employees: null, studied: 0, missed: 0, falseSuspicion: 0 }; mc.set(k, v); } return v; };
+  // Employees per month: distinct level-1 / level-2 codes that examined at least one image at the port that month.
+  const staff = new Map<string, Set<string>>();
+  for (const x of months) {
+    if (x.port !== port) continue;
+    const v = mcAt(x.month);
+    v.images = (v.images ?? 0) + x.images;
+    const set = staff.get(x.month) ?? new Set<string>();
+    for (const rec of [x.l1, x.l2]) for (const c of Object.keys(rec)) if (c && !NON_EMPLOYEE_CODES.has(c.toUpperCase())) set.add(c);
+    staff.set(x.month, set);
+  }
+  for (const [k, set] of staff) mcAt(k).employees = set.size;
   for (const r of input.studies) {
     if (r.port !== port || !r.monthKey || (opts.lastMonth && r.monthKey > opts.lastMonth)) continue;
     const v = mcAt(r.monthKey);
+    v.studied += 1;
     if (r.imageStatus === STATUS_MISSED) v.missed += 1;
     else if (r.imageStatus === STATUS_FALSE_SUSPICION) v.falseSuspicion += 1;
   }
@@ -168,6 +204,8 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   input.population = [...popRows.values()] as PortReportInput["population"];
   if (!listReportPorts(input).includes(port)) throw new Error(`port not in workbook: ${port}`);
   const model = buildPortReportModel(input, port, opts.displayName ? { displayName: opts.displayName } : {});
+  workload.selectedEmployeeMean = model.distribution.mean;
+  workload.selectedEmployees = model.distribution.tiered;
   return { model, workload, html: buildPortReportHtml(model, workload), observations: buildPortObservations(model, workload) };
 }
 
@@ -231,7 +269,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
     ["القوى العاملة حسب حجم الصور", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload, workload.imageTiers ?? []).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
     ["حدود أثلاث العبء", ["المستوى", "عدد المنافذ", "من (حالة للموظف في الشهر)", "إلى", "متوسط جميع المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]])])],
     ["حدود أثلاث حجم الصور", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المنافذ"], (workload.imageTiers ?? []).map((t) => [t.label, t.ports.length, round(t.from), round(t.to), t.ports.map((p) => p.port).join("، ")])],
-    ["مستويات الدقة", ["المستوى", "من", "إلى", "المنافذ", "المدروسة", "نسبة التوائم - الأول", "نسبة التوائم - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.ports.join("، "), g.outcomes.image.studied, pct(g.outcomes.l1.accuracy), pct(g.outcomes.l2.accuracy)])],
+    ["مستويات دقة الموظفين (المنافذ الأخرى)", ["المستوى", "من", "إلى", "الموظفون", "متوسط دقة الموظفين", "إجابات الأول", "نسبة التوائم - الأول", "الفائت - الأول", "الخاطئ - الأول", "إجابات الثاني", "نسبة التوائم - الثاني", "الفائت - الثاني", "الخاطئ - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.employees, pct(g.meanAccuracy), g.outcomes.l1.studied, pct(g.outcomes.l1.accuracy), g.outcomes.l1.missed, g.outcomes.l1.falseSuspicion, g.outcomes.l2.studied, pct(g.outcomes.l2.accuracy), g.outcomes.l2.missed, g.outcomes.l2.falseSuspicion])],
     ["المستويان حسب مستوى العبء", ["النطاق", "المستوى", ...scHead], scopes.flatMap(([n, o]) => [[n, ...sc("المستوى الأول", o.l1)], [n, ...sc("المستوى الثاني", o.l2)]])],
     ["الأداء حسب السنة", ["السنة", "النطاق", "المستوى", ...scHead],
       workload.yearly.flatMap((y) => ([[workload.displayName, y.selected], ...workload.tiers.map((t) => [tierLabel(t), y.tiers[t.key]])] as Array<[string, LevelOutcomes | undefined]>)
