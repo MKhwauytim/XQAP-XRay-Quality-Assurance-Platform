@@ -38,7 +38,7 @@ export type WorkloadRead = {
 export const isTransitDeclaration = (v: unknown): boolean => String(v ?? "").includes("ترانزيت");
 
 const ID = ["معرف الأشعة", "معرف الاشعة", "رقم صورة الاشعة"];
-const DATE = ["تاريخ دخول الأشعة", "تاريخ دخول الاشعة", "تاريخ دخول للاشعة", "تاريخ الاشعة"];
+const DATE = ["تاريخ دخول الأشعة", "تاريخ الدخول", "تاريخ دخول الاشعة", "تاريخ دخول للاشعة", "تاريخ الاشعة"];
 const RES1 = ["نتيجة المستوى الأول", "نتيجة المستوى الاول", "المستوى الاول", "المستوى الأول"];
 const RES2 = ["نتيجة المستوى الثاني", "المستوى الثاني"];
 const CODE1 = ["كود موظف المستوى الأول"];
@@ -50,8 +50,8 @@ const SUSPICION = /[اإ]شتبا[هة]/;
 /** Result codes that are a system, not a person. */
 const NON_EMPLOYEE = new Set(["X-RAY", "XRAY"]);
 
-/** The population sheets the report reads: «2025», «2025-Q1», «Q4B». Sheets before 2025 («2024») are skipped: 2024 is not part of the report. */
-export const isWorkloadSheet = (name: string): boolean => /^(\d{4}(-Q\d)?|Q\dB)$/.test(name) && !(/^\d{4}/.test(name) && name.slice(0, 4) < "2025");
+/** The population sheets the report reads: «2025», «2025-Q1», «Q4B», and a quarter split by month («Q3M7»). Sheets before 2025 («2024») are skipped: 2024 is not part of the report. */
+export const isWorkloadSheet = (name: string): boolean => /^(\d{4}(-Q\d)?|Q\dB|Q\dM\d{1,2})$/.test(name) && !(/^\d{4}/.test(name) && name.slice(0, 4) < "2025");
 
 /** Oldest first and Q4B last, so a duplicate keeps the row from its own period sheet. */
 export function orderWorkloadSheets<T>(sheets: readonly T[], nameOf: (s: T) => string): T[] {
