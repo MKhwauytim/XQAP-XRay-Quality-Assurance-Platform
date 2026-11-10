@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.19",
+    "date": "2026-11-10",
+    "bucket": "feature",
+    "scope": "port tool",
+    "title": "v160.19 processed-data Excel (population and samples by quarter, by month above 1M rows, index and dashboards); 2025 result columns exchanged with their codes"
+  },
+  {
     "version": "v160.18",
     "date": "2026-11-10",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "pptx",
     "title": "v160.10 svg charts keep their colours in the port tool's PowerPoint"
-  },
-  {
-    "version": "v160.9",
-    "date": "2026-11-09",
-    "bucket": "fix",
-    "scope": "port report",
-    "title": "v160.9 one method for workforce figures, tier ranges, second workforce slide, employee cut at 10% of the average"
   }
 ];

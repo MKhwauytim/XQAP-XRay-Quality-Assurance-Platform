@@ -260,7 +260,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: EYEBROW.w3, title: "دقة المستوى الأول والثاني حسب مستوى الدقة", note: "جميع الموظفين المدروسة حالاتهم في ثلاث فئات حسب دقة كل موظف" })}
+        `${contentHead({ eyebrow: EYEBROW.w3, title: "دقة المستوى الأول والثاني حسب مستوى الدقة", note: "موظفو المنفذ في لوحة مستقلة، وموظفو المنافذ الأخرى في ثلاث فئات حسب دقة كل موظف" })}
 <div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, note: p.note, body: `<div style="font-size:19px;line-height:1.5;color:var(--v3-muted);margin:0 0 10px;min-width:0"><div>عدد الموظفين <b style="color:var(--v3-navy)">${fmtNum(p.staff)}</b></div><div>متوسط دقة الموظفين <b style="color:var(--v3-navy)">${pct(p.mean)}</b></div></div>${levelTable(p.o)}` })).join("")}</div>`,
       ),
     );

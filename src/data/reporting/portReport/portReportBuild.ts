@@ -113,9 +113,9 @@ export type PortReportBuild = {
  * the answers its employees gave at that level.
  */
 function accuracyGroups(studies: PortReportInput["studies"], selected: string): NonNullable<WorkloadSlideInput["accuracyGroups"]> {
-  // Every studied employee, the selected port's included (owner, 2026-11-10).
-  void selected;
-  const other = studies;
+  // The selected port's staff stand alone in their own panel; the three groups are built from the
+  // answers given at every other port (owner, 2026-11-10): whoever examined there is graded there.
+  const other = studies.filter((r) => r.port !== selected);
   const rated = buildEmployeeRows(other);
   const minStudied = employeeMinStudied(rated);
   const eligible = rated.filter((e) => e.studied >= minStudied && e.accuracy !== null);
