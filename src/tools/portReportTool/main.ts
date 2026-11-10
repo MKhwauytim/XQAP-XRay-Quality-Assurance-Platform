@@ -173,13 +173,13 @@ async function run(out: string): Promise<void> {
     else if (out === "pdf") printPdf(r);
     else if (out === "pptx") {
       setStatus("جارٍ إعداد ملف PowerPoint…");
-      downloadBlob((await deckHtmlToPptx(r.html, name)).blob, `${name}.pptx`);
+      downloadBlob((await deckHtmlToPptx(r.html, name, { minWeight: 500 })).blob, `${name}.pptx`);
     } else if (out === "zip") {
       setStatus("جارٍ إعداد الملف المضغوط…");
       const zip = new JSZip();
       zip.file(`${name}.html`, r.html);
       zip.file(`${name}.xlsx`, await xlsx());
-      zip.file(`${name}.pptx`, (await deckHtmlToPptx(r.html, name)).blob);
+      zip.file(`${name}.pptx`, (await deckHtmlToPptx(r.html, name, { minWeight: 500 })).blob);
       downloadBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }), `${name}.zip`);
     }
     setStatus(out === "pdf" ? "فُتح التقرير في نافذة جديدة: اختر «حفظ كملف PDF» في نافذة الطباعة." : `تم تنزيل «${name}».`, "ok");

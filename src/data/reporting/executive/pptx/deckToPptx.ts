@@ -17,8 +17,12 @@ import type { Run, SlideGeo } from "./deckGeometry";
 // Medium and Bold are four separate faces, so the CSS weight picks the face and PowerPoint bold stays off.
 const FONT = "Somar";
 const FONT_BOLD = "Somar Bold";
-export const somarFace = (weight: number): string =>
-  weight <= 350 ? "Somar Light" : weight <= 450 ? FONT : weight <= 550 ? "Somar Medium" : FONT_BOLD;
+export const somarFace = (weight: number, floor = 0): string => {
+  const w = Math.max(weight, floor);
+  return w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD;
+};
+/** Export options. `minWeight: 500` sets Light and Regular text in Somar Medium; bold stays Somar Bold. */
+export type DeckPptxOptions = { minWeight?: number };
 const FIT_SAFETY = 1.04;
 const inch = (px: number): number => px / 144;
 const pt = (px: number): number => px * 0.5;
@@ -42,7 +46,7 @@ export function labelNumber(label: string | null | undefined): number | null {
 type PptxText = { text: string; options: Record<string, unknown> };
 type TextRun = Extract<Run, { text: string }>;
 
-function runsToPptx(input: Run[], bg: string): PptxText[] {
+function runsToPptx(input: Run[], bg: string, floor = 0): PptxText[] {
   let runs = input;
   // A block with no Arabic letters split over several spans becomes one run, so the
   // left-to-right wrapping in post-processing sees the whole cluster.
@@ -57,7 +61,7 @@ function runsToPptx(input: Run[], bg: string): PptxText[] {
     if (r.br) { if (out.length) out[out.length - 1].options.breakLine = true; continue; }
     const brk = soft;
     soft = false;
-    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: cssToHex(r.color, bg), fontSize: pt(r.size), bold: false, fontFace: somarFace(r.weight), lang: "ar-SA" } });
+    out.push({ text: r.text, options: { softBreakBefore: brk || undefined, color: cssToHex(r.color, bg), fontSize: pt(r.size), bold: false, fontFace: somarFace(r.weight, floor), lang: "ar-SA" } });
   }
   return out.length ? out : [{ text: "", options: {} }];
 }
@@ -100,15 +104,17 @@ export function fixPartXml(xml: string, isSlide: boolean): string {
 }
 
 /** The PowerPoint file for `slides`. */
-export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blob> {
+export async function deckToPptx(slides: SlideGeo[], title: string, options: DeckPptxOptions = {}): Promise<Blob> {
+  const floor = options.minWeight ?? 0;
+  const base = somarFace(400, floor);
   const { default: PptxGenJS } = await import("pptxgenjs");
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "DECK3", width: inch(1920), height: inch(1080) });
   pptx.layout = "DECK3";
   pptx.rtlMode = true;
-  pptx.theme = { headFontFace: FONT, bodyFontFace: FONT };
+  pptx.theme = { headFontFace: base, bodyFontFace: base };
   pptx.title = title;
-  const textBase = { fontFace: FONT, rtlMode: true, lang: "ar-SA", margin: 0, fit: "none" as const, valign: "top" as const, align: "right" as const };
+  const textBase = { fontFace: base, rtlMode: true, lang: "ar-SA", margin: 0, fit: "none" as const, valign: "top" as const, align: "right" as const };
 
   for (const g of slides) {
     const slide = pptx.addSlide();
@@ -129,10 +135,10 @@ export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blo
       const grid = t.rows.reduce((a, r) => (r.cells.length > a.cells.length && r.cells.every((c) => c.colspan === 1) ? r : a), t.rows[0]);
       const rows = t.rows.map((r) =>
         r.cells.map((c) => ({
-          text: runsToPptx(c.runs, bg),
+          text: runsToPptx(c.runs, bg, floor),
           options: {
             colspan: c.colspan > 1 ? c.colspan : undefined,
-            fontFace: somarFace(c.weight), fontSize: pt(c.size), bold: false, color: cssToHex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
+            fontFace: somarFace(c.weight, floor), fontSize: pt(c.size), bold: false, color: cssToHex(c.color, bg), align: "right", valign: "middle", rtlMode: true, lang: "ar-SA",
             margin: [0, inch(c.padR), 0, inch(c.padL)].map((v) => Math.min(v, 0.99)),
             fill: c.fill ? { color: cssToHex(c.fill, bg) } : undefined,
             border: [
@@ -183,7 +189,7 @@ export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blo
         barGapWidthPct: Math.max(0, Math.min(500, Math.round(((slot - c.series * barW) / barW) * 100))),
         showLegend: false,
         valAxisHidden: true, valAxisMinVal: min, valAxisMaxVal: max, valGridLine: { style: "none" }, valAxisLineShow: false,
-        catAxisLabelFontFace: FONT, catAxisLabelFontSize: pt(c.cats[0]?.size ?? 18), catAxisLabelColor: cssToHex(c.cats[0]?.color ?? "rgb(16,48,79)"), catAxisLineShow: false,
+        catAxisLabelFontFace: base, catAxisLabelFontSize: pt(c.cats[0]?.size ?? 18), catAxisLabelColor: cssToHex(c.cats[0]?.color ?? "rgb(16,48,79)"), catAxisLineShow: false,
         // First category on the right, as in the HTML. PowerPoint accepts "maxMin";
         // pptxgenjs's types list only "minMax".
         catAxisOrientation: "maxMin" as "minMax",
@@ -201,7 +207,7 @@ export async function deckToPptx(slides: SlideGeo[], title: string): Promise<Blo
       const w = multi ? Math.min(t.content.w, r.w * FIT_SAFETY) : r.w;
       const x = multi ? r.x + r.w - w : r.x;
       const lh = t.runs.find((x2): x2 is TextRun => !x2.br)?.lh ?? 30;
-      slide.addText(runsToPptx(t.runs, bg) as unknown as Parameters<typeof slide.addText>[0], {
+      slide.addText(runsToPptx(t.runs, bg, floor) as unknown as Parameters<typeof slide.addText>[0], {
         ...textBase,
         x: inch(x), y: inch(r.y), w: inch(w), h: inch(r.h + 2),
         wrap: multi,

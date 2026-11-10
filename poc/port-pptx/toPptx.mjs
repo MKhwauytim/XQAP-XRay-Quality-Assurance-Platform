@@ -26,9 +26,10 @@ const themeVar = (name) => reportHtml.match(new RegExp(`--v3-${name}:(#[0-9a-fA-
 
 // Somar installs on the owner's machines as one family per weight («Somar Light», «Somar», «Somar Medium», «Somar Bold»): Light, Regular,
 // Medium and Bold are four separate faces, so the weight picks the face and bold stays off.
-const FONT = "Somar";
+const FONT = "Somar Medium";
 const FONT_BOLD = "Somar Bold";
-const face = (w) => (w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD);
+// The port report sets Light and Regular text in Somar Medium (owner, 2026-11-10).
+const face = (w0) => { const w = Math.max(w0, 500); return (w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD); };
 const FIT_SAFETY = 1.04;
 const inch = (px) => px / 144;
 const pt = (px) => px * 0.5;

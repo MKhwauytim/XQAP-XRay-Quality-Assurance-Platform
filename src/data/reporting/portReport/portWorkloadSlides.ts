@@ -176,7 +176,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
     );
   };
   const staffNote = `الموظفون: كل من فحص حالة واحدة على الأقل في المنفذ، ومتوسطهم عددهم في كل شهر. متوسط حالات الموظف: الموظفون الذين فحصوا أقل من ${Math.round(POOL_SHARE * 100)}% من متوسط الشهر تُجمع حالاتهم وتُحسب موظفين مكافئين. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.`;
-  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على متوسط فحص الموظف في الشهر", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء", "حالة للموظف في الشهر");
+  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء", "حالة للموظف في الشهر");
   if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم", "صورة في الشهر");
 
   // 2 — Workforce distribution: images, staff and each employee's output per tier.
@@ -226,7 +226,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       ),
     );
   };
-  workforcePage(w.tiers, "w2", "بناءً على متوسط فحص الموظف في الشهر");
+  workforcePage(w.tiers, "w2", "بناءً على عدد الصور في المنافذ");
   if (w.imageTiers?.length) workforcePage(w.imageTiers, "w2b", "بناءً على عدد الصور في المنافذ");
 
   // 3 — Level 1 and level 2 results by workload tier
