@@ -111,7 +111,7 @@ function readFile(file: File): void {
       return;
     }
     const wl = m.read.workload;
-    data = { studyRows: m.read.studyRows, workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds };
+    data = { studyRows: m.read.studyRows, workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds, studyCodes: wl.studyCodes };
     transitField.hidden = !wl.transitIds?.length;
     excludeTransit.checked = false;
     progressBar.style.width = "100%";

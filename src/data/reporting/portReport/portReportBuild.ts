@@ -17,7 +17,7 @@ import { buildPortWorkloads, buildVolumeTiers, LOAD_YEAR, outcomesByYear, outcom
 import type { LevelOutcomes, WorkloadTierKey } from "./portWorkloadModel";
 import { groupTotals, workforceFigures } from "./portWorkloadSlides";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
-import type { WorkloadMonth } from "./workloadAggregate";
+import type { StudyCodes, WorkloadMonth } from "./workloadAggregate";
 
 type Rows = unknown[][];
 
@@ -52,7 +52,22 @@ export type PortReportData = {
   workloadMonthsNoTransit?: readonly WorkloadMonth[];
   /** Image ids of transit declarations (workloadAggregate's `transitIds`). */
   transitIds?: readonly string[];
+  /** Population employees for studied image ids (workloadAggregate's `studyCodes`), used to fill study rows without codes. */
+  studyCodes?: Readonly<Record<string, StudyCodes>>;
 };
+
+/** Study rows whose level has no employee code take it from the population row of the same image id. Returns how many levels were filled. */
+export function fillStudyCodes(studies: PortReportInput["studies"], codes: Readonly<Record<string, StudyCodes>> | undefined): number {
+  if (!codes) return 0;
+  let filled = 0;
+  for (const r of studies) {
+    const e = r.id ? codes[r.id] : undefined;
+    if (!e) continue;
+    if (r.l1 && !r.l1.code && e.c1) { r.l1.code = e.c1; if (!r.l1.name && e.n1) r.l1.name = e.n1; filled++; }
+    if (r.l2 && !r.l2.code && e.c2) { r.l2.code = e.c2; if (!r.l2.name && e.n2) r.l2.name = e.n2; filled++; }
+  }
+  return filled;
+}
 
 /** Canonical port name lookup over both sources, so «ميناء جده الاسلامي» and «ميناء جدة الإسلامي» are one port. */
 function portNameLookup(data: PortReportData, input: PortReportInput): (p: string) => string {
@@ -137,6 +152,7 @@ function accuracyGroups(studies: PortReportInput["studies"], selected: string): 
 
 export function buildPortReport(data: PortReportData, opts: PortReportOptions): PortReportBuild {
   const input = studyInput(data, opts.period);
+  fillStudyCodes(input.studies, data.studyCodes);
   const canon = portNameLookup(data, input);
   for (const r of input.studies) r.port = canon(r.port);
   input.studies = input.studies.filter((r) => (r.year === null || String(r.year) >= FIRST_REPORT_YEAR) && (!r.monthKey || inReportYears(r.monthKey)));

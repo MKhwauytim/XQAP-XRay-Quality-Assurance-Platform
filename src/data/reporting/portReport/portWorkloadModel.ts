@@ -179,7 +179,12 @@ function employeeLoad(months: readonly WorkloadMonthInput[], totals: EmployeeTot
   // check, 2026-11-09): averaging each month's mean and then weighting levels differently let the
   // overall figure fall below both levels. As a ratio of sums the overall always sits with its levels.
   const sumOf = (g: (x: (typeof perMonth)[number]) => number) => perMonth.reduce((a, x) => a + g(x), 0);
-  const pool = { all: { n: sumOf((x) => x.n), eq: sumOf((x) => x.eq) }, l1: { n: sumOf((x) => x.n1), eq: sumOf((x) => x.eq1) }, l2: { n: sumOf((x) => x.n2), eq: sumOf((x) => x.eq2) } };
+  const l1 = { n: sumOf((x) => x.n1), eq: sumOf((x) => x.eq1) };
+  const l2 = { n: sumOf((x) => x.n2), eq: sumOf((x) => x.eq2) };
+  // Overall = level-1 and level-2 examinations ÷ level-1 and level-2 employees (owner, 2026-11-10):
+  // an employee working both levels counts once per level, so the overall is the combined average
+  // of the two levels and always lies between them (counting that person once put it above both).
+  const pool = { all: { n: l1.n + l2.n, eq: l1.eq + l2.eq }, l1, l2 };
   const ratio = (t: PoolTotals) => (t.eq > 0 ? t.n / t.eq : null);
   // Everyone who examined at least one of the port's images in these months.
   const people = new Set<string>();
@@ -313,10 +318,9 @@ export function buildWorkloadTiers(all: readonly PortWorkload[], measureOf: (p: 
 }
 
 /**
- * Tiers by the port's own image volume (owner's rule, 2026-11-10). A plain average is pulled up by
- * the few very large ports, so the reference average leaves them out: ports above the upper fence
- * (third quartile + 1.5 × the interquartile range) are excluded from it. Then:
- * منخفض = below that average; متوسط = from the average up to the fence; عالي = above the fence.
+ * Tiers by the port's own image volume (owner's rule, 2026-11-10). The reference average is the median
+ * port's images a month, which the few very large ports cannot pull up. منخفض = below it; متوسط = from
+ * it up to the upper fence (third quartile + 1.5 × the interquartile range); عالي = above the fence.
  */
 export function buildVolumeTiers(all: readonly PortWorkload[], measureOf: (p: PortWorkload) => number | null): WorkloadTier[] {
   const ports = all.filter((p) => measureOf(p) !== null);
@@ -325,8 +329,9 @@ export function buildVolumeTiers(all: readonly PortWorkload[], measureOf: (p: Po
   const v = ports.map(measure).sort((a, b) => a - b);
   const q = (f: number) => { const i = (v.length - 1) * f; const lo = Math.floor(i); return v[lo] + (v[Math.ceil(i)] - v[lo]) * (i - lo); };
   const fence = q(0.75) + 1.5 * (q(0.75) - q(0.25));
-  const core = v.filter((x) => x <= fence);
-  const avg = core.reduce((a, x) => a + x, 0) / core.length;
+  // Reference average: the median port (owner, 2026-11-10). Unlike the plain mean it is not pulled
+  // up by the very large ports, so a port is «low» only when it is below the typical port.
+  const avg = q(0.5);
   const keyOf = (x: number): WorkloadTierKey => (x < avg ? "low" : x <= fence ? "mid" : "high");
   const keys: WorkloadTierKey[] = ["low", "mid", "high"];
   return keys.map((key) => {

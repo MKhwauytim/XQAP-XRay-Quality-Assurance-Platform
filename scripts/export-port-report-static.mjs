@@ -47,6 +47,8 @@ try {
   // positional workbook only needs «نتائج الدراسة»; population comes from the
   // workload sheets. Otherwise the original layout (study sheet + population pivot).
   const workloadPath = flag("workload");
+  // Studied image ids: the population pass keeps their employee codes so study rows without codes can be completed.
+  const studyIds = (rows, cols) => { const i = (rows?.[0] ?? []).findIndex((h) => cols.includes(String(h ?? "").trim())); return new Set(i < 0 ? [] : rows.slice(1).map((r) => String(r[i] ?? "").trim()).filter(Boolean)); };
   const wb = XLSX.read(readFileSync(resolve(workbookPath)), { type: "buffer", dense: true, sheets: workloadPath ? [src.STUDY_SHEET] : undefined });
   const sheets = {};
   for (const name of [src.STUDY_SHEET, src.POPULATION_SHEET]) {
@@ -65,11 +67,11 @@ try {
     const agg = await server.ssrLoadModule("/src/data/reporting/portReport/workloadAggregate.ts");
     // --workload-cache=<file.json> keeps the (minutes-long) workbook pass between layout iterations.
     const cachePath = flag("workload-cache");
-    const wl = cachePath && existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : await readWorkload(resolve(workloadPath), agg.createWorkloadAggregator);
+    const wl = cachePath && existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : await readWorkload(resolve(workloadPath), () => agg.createWorkloadAggregator({ codesFor: studyIds(sheets[src.STUDY_SHEET], src.STUDY_ID_COLS) }));
     if (cachePath && wl && !existsSync(cachePath)) writeFileSync(cachePath, JSON.stringify(wl));
     if (!wl) throw new Error(`no year/quarter population sheets in ${workloadPath}`);
     for (const s of wl.sheets) console.log(`  ${s.name}: ${s.rows} images, ${s.coded} with employee codes, ${s.duplicates} repeated ids skipped, ${s.transit ?? 0} transit`);
-    const data = { studyRows: sheets[src.STUDY_SHEET], workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds };
+    const data = { studyRows: sheets[src.STUDY_SHEET], workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds, studyCodes: wl.studyCodes };
     if (!port) {
       console.log("ports:\n  " + build.listPortsInData(data).join("\n  "));
     } else {

@@ -32,7 +32,11 @@ export type WorkloadRead = {
   /** Image ids of transit declarations. */
   transitIds?: string[];
   sheets: WorkloadSheetReport[];
+  /** Employee codes / names the population holds for the studied image ids (only ids passed in `codesFor`). */
+  studyCodes?: Record<string, StudyCodes>;
 };
+/** An image's level-1 / level-2 employee code and name as the population records them. */
+export type StudyCodes = { c1?: string; n1?: string; c2?: string; n2?: string };
 
 /** «البيان» = ترانزيت marks a transit declaration. */
 export const isTransitDeclaration = (v: unknown): boolean => String(v ?? "").includes("ترانزيت");
@@ -72,10 +76,11 @@ export function dayOf(v: unknown): string {
 }
 
 type Acc = { port: string; type: string; month: string; images: number; suspicion: number; coded: number; days: Set<string>; l1: Map<string, number>; l2: Map<string, number> };
-type Cols = { id?: string; date?: string; port?: string; type?: string; c1?: string; c2?: string; r1?: string; r2?: string; decl?: string };
+type Cols = { id?: string; date?: string; port?: string; type?: string; c1?: string; c2?: string; n1?: string; n2?: string; r1?: string; r2?: string; decl?: string };
 
 /** Feed each sheet's rows in order; `result()` returns the months and a per-sheet report. */
-export function createWorkloadAggregator() {
+export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> } = {}) {
+  const studyCodes: Record<string, StudyCodes> = {};
   const seen = new Set<string>();
   const acc = new Map<string, Acc>();
   const accNoTransit = new Map<string, Acc>();
@@ -98,7 +103,7 @@ export function createWorkloadAggregator() {
         // The header is the first row holding the image id column.
         if (!Object.values(cells).some((v) => ID.includes(String(v).trim()))) return;
         const f = (hs: string[]) => Object.keys(cells).find((k) => hs.includes(String(cells[k]).trim()));
-        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE1_2025 : CODE1), c2: f(is2025 ? CODE2_2025 : CODE2), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
+        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE1_2025 : CODE1), c2: f(is2025 ? CODE2_2025 : CODE2), n1: is2025 ? undefined : f(CODE1_2025), n2: is2025 ? undefined : f(CODE2_2025), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
         return;
       }
       const at = (k?: string) => (k ? cells[k] : undefined);
@@ -121,6 +126,14 @@ export function createWorkloadAggregator() {
       const ok1 = c1 !== "" && !NON_EMPLOYEE.has(c1.toUpperCase());
       const ok2 = c2 !== "" && !NON_EMPLOYEE.has(c2.toUpperCase());
       if (ok1 || ok2) sheet.coded++;
+      // Keep the population's employees for the studied images, so a study row without codes can be completed.
+      // Only the 2026-layout sheets, whose «كود موظف المستوى الأول/الثاني» headers are explicit: in the 2025
+      // sheets the level-1 and level-2 code columns hold the opposite code families (pending owner check).
+      if (id && !is2025 && (ok1 || ok2) && opts.codesFor?.has(id)) {
+        const e = studyCodes[id] ?? (studyCodes[id] = {});
+        if (ok1 && !e.c1) { e.c1 = c1; e.n1 = clean(at(col.n1)) || undefined; }
+        if (ok2 && !e.c2) { e.c2 = c2; e.n2 = clean(at(col.n2)) || undefined; }
+      }
       // An image is «اشتباه» when either level flagged it (2026 writes «نتيجة اشتباه -مبدئي»).
       const suspicious = SUSPICION.test(clean(at(col.r1))) || SUSPICION.test(clean(at(col.r2)));
       const key = `${port}|${day.slice(0, 7)}`;
@@ -142,7 +155,7 @@ export function createWorkloadAggregator() {
     },
     result(): WorkloadRead {
       const out = (m: Map<string, Acc>) => [...m.values()].map((a): WorkloadMonth => ({ ...a, days: [...a.days], l1: Object.fromEntries(a.l1), l2: Object.fromEntries(a.l2) }));
-      return { months: out(acc), monthsNoTransit: out(accNoTransit), transitIds, sheets: report };
+      return { months: out(acc), monthsNoTransit: out(accNoTransit), transitIds, sheets: report, studyCodes };
     },
   };
 }

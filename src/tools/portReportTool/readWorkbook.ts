@@ -6,7 +6,7 @@
 // scripts/lib/workloadSheets.mjs; both feed workloadAggregate.ts.
 
 import JSZip from "jszip";
-import { STUDY_SHEET } from "../../data/reporting/portReport/portReportSource";
+import { STUDY_ID_COLS, STUDY_SHEET } from "../../data/reporting/portReport/portReportSource";
 import { createWorkloadAggregator, isWorkloadSheet, orderWorkloadSheets } from "../../data/reporting/portReport/workloadAggregate";
 import type { WorkloadRead } from "../../data/reporting/portReport/workloadAggregate";
 
@@ -114,7 +114,10 @@ export async function readReportWorkbook(data: ArrayBuffer, progress: ReadProgre
     studyRows.push(row);
   });
 
-  const agg = createWorkloadAggregator();
+  // Studied image ids, so the population pass keeps their employee codes (study rows without codes are completed from it).
+  const idCol = (studyRows[0] ?? []).findIndex((h) => STUDY_ID_COLS.includes(String(h ?? "").trim()));
+  const codesFor = new Set<string>(idCol < 0 ? [] : studyRows.slice(1).map((r) => String(r[idCol] ?? "").trim()).filter(Boolean));
+  const agg = createWorkloadAggregator({ codesFor });
   for (let i = 0; i < workloadSheets.length; i++) {
     const [name, path] = workloadSheets[i];
     progress(`قراءة ورقة ${name}`, i + 1, total);
