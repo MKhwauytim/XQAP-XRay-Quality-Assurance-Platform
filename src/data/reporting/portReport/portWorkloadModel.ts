@@ -312,6 +312,54 @@ export function buildWorkloadTiers(all: readonly PortWorkload[], measureOf: (p: 
   });
 }
 
+/**
+ * Tiers by the port's own image volume (owner's rule, 2026-11-10). A plain average is pulled up by
+ * the few very large ports, so the reference average leaves them out: ports above the upper fence
+ * (third quartile + 1.5 × the interquartile range) are excluded from it. Then:
+ * منخفض = below that average; متوسط = from the average up to the fence; عالي = above the fence.
+ */
+export function buildVolumeTiers(all: readonly PortWorkload[], measureOf: (p: PortWorkload) => number | null): WorkloadTier[] {
+  const ports = all.filter((p) => measureOf(p) !== null);
+  if (!ports.length) return [];
+  const measure = (p: PortWorkload) => measureOf(p) as number;
+  const v = ports.map(measure).sort((a, b) => a - b);
+  const q = (f: number) => { const i = (v.length - 1) * f; const lo = Math.floor(i); return v[lo] + (v[Math.ceil(i)] - v[lo]) * (i - lo); };
+  const fence = q(0.75) + 1.5 * (q(0.75) - q(0.25));
+  const core = v.filter((x) => x <= fence);
+  const avg = core.reduce((a, x) => a + x, 0) / core.length;
+  const keyOf = (x: number): WorkloadTierKey => (x < avg ? "low" : x <= fence ? "mid" : "high");
+  const keys: WorkloadTierKey[] = ["low", "mid", "high"];
+  return keys.map((key) => {
+    const tp = ports.filter((p) => keyOf(measure(p)) === key).sort((a, b) => measure(b) - measure(a) || a.port.localeCompare(b.port));
+    const lo = tp.length ? measure(tp[tp.length - 1]) : 0;
+    const hi = tp.length ? measure(tp[0]) : 0;
+    const f = (g: (p: PortWorkload) => number | null) => mean(tp.map(g));
+    return {
+      key,
+      label: TIER_LABELS[key],
+      from: lo,
+      to: hi,
+      ports: tp,
+      ranges: { [ALL_PORTS_KEY]: [lo, hi] } as Record<string, [number, number]>,
+      averages: { [ALL_PORTS_KEY]: avg } as Record<string, number>,
+      avg: {
+        images: f((p) => p.images) ?? 0,
+        imagesPerMonth: f((p) => p.imagesPerMonth) ?? 0,
+        employees: f((p) => p.employees),
+        employeesPerMonth: f((p) => p.employeesPerMonth),
+        perEmployeeMonth: f((p) => p.perEmployeeMonth),
+        perEmployeeDay: f((p) => p.perEmployeeDay),
+        l1Employees: f((p) => p.l1Employees),
+        l2Employees: f((p) => p.l2Employees),
+        l1PerDay: f((p) => p.l1PerDay),
+        l2PerDay: f((p) => p.l2PerDay),
+        l1PerMonth: f((p) => p.l1PerMonth),
+        l2PerMonth: f((p) => p.l2PerMonth),
+      },
+    };
+  });
+}
+
 export function tierOf(tiers: readonly WorkloadTier[], port: string): WorkloadTier | undefined {
   return tiers.find((t) => t.ports.some((p) => p.port === port));
 }

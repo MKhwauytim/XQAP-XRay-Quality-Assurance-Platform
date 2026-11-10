@@ -28,7 +28,7 @@ import { esc, fmtNum } from "../executive/primitives";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../branding/organization";
 import type { AccuracyTier, OutcomeStats, PortReportModel, ScopeSummary } from "./portReportModel";
 import { employeeMinStudied } from "./portReportModel";
-import { workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
+import { TIER_LOGIC, workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
 import { buildPortObservations } from "./portObservations";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
 
@@ -195,8 +195,8 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
               { term: "الموظف المخصص للمنفذ", definition: "كل من فحص حالة واحدة على الأقل في المنفذ. الإجمالي: عددهم دون تكرار؛ والمتوسط: عددهم في كل شهر." },
               { term: "متوسط عدد الحالات المفحوصة للموظف الواحد", definition: "حالات المنفذ في الشهر ÷ موظفيه، مع جمع حالات من فحص أقل من عُشر المتوسط واحتسابهم موظفين مكافئين." },
               { term: "متوسط الحالات للموظف في الشهر حسب المستوى", definition: "حالات المستوى الأول ÷ موظفي المستوى الأول المخصصين في الشهر، وكذلك المستوى الثاني، بنفس قاعدة الموظف المخصص." },
-              { term: "مستوى العبء التشغيلي", definition: "المنافذ البرية والبحرية معاً مرتبة حسب حالات الموظف (أو الصور في الشهر) ومقسومة ثلاثة أثلاث متساوية: منخفض ومتوسط وعالي." },
-              { term: "مستوى الدقة", definition: "المنافذ التي دُرس منها 30 صورة فأكثر، مرتبة حسب نسبة التوائم ومقسومة ثلاثة أثلاث." },
+              { term: "مستوى العبء التشغيلي", definition: TIER_LOGIC },
+              { term: "مستوى الدقة", definition: "جميع الموظفين المدروسة حالاتهم (10% من متوسط الحالات المدروسة للموظف فأكثر) في ثلاث فئات متساوية المدى بين أقل نسبة توائم وأعلاها: منخفضة ومتوسطة وعالية." },
             ],
           },
         ],
@@ -533,7 +533,7 @@ ${tintedPanel({
   // With workload data: three main sections (العبء التشغيلي، نتائج الدراسة، التوصيات), then the appendices.
   // The year-on-year tier comparison sits in ملحق ب; «أداء المنفذ مقارنة بمستويات العبء» (w4) is left out.
   const order: string[][] = workload
-    ? [b("cover"), b("div1w"), b("popMonthly"), wl("w1"), wl("w1b"), wl("w2"), wl("w2b"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
+    ? [b("cover"), b("div1w"), b("popMonthly"), wl("w1"), wl("w2"), b("div2w"), b("counts"), b("staffVs"), wl("w3"), b("tiers"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
        b("div1"), b("pop"), b("div2"), wl("w5"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("emp"), b("div4"), b("empLow"), b("closing")]
     : [b("cover"), b("gloss"), b("div1"), b("pop"), b("div2"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("tiers"), b("staffVs"), b("emp"), b("div4"), b("empLow"), b("closing")];
   const html = order.flat().join("\n");
@@ -683,26 +683,29 @@ const TIER_TONE: Record<AccuracyTier["key"], ChartTone> = { low: "red", mid: "go
  * images were replaced by the studied ones, the base of the error counts). The two bands share the RTL
  * month axis of the نسبة التوائم timeline, each on its own zero-based scale.
  */
-type BandSeries = { label: string; color: string; band: "top" | "bottom"; values: (number | null)[]; chipDy: number; total: boolean };
+type BandSeries = { label: string; color: string; band: "top" | "bottom"; values: (number | null)[]; chipDy: number; total: boolean; /** Values are percentages; the legend shows this summary instead of totals. */ percent?: string };
 type BandTimeline = { eyebrow: string; title: string; aria: string; topTitle: string; botTitle: string; series: BandSeries[]; notes: string[] };
 
 /** Monthly studied images (top band) with the missed and false suspicions among them (bottom band). */
 function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string {
   const months = w.monthlyCounts ?? [];
+  const share = (n: number, of: number) => (of ? (100 * n) / of : null);
+  const totalOf = (k: "missed" | "falseSuspicion" | "studied") => months.reduce((a0, x0) => a0 + x0[k], 0);
   const notes: string[] = [];
   const firstMissed = months.findIndex((x0) => x0.missed > 0);
   if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${Number(months[firstMissed].monthKey.slice(5))}/${months[firstMissed].monthKey.slice(0, 4)}.`);
-  notes.push("الحالات المدروسة: الصور التي درسها أخصائي ضمان جودة الأشعة في كل شهر، ومنها تُحسب الاشتباهات الفائتة والخاطئة.");
+  notes.push("الخط المتقطع لكل مؤشر: متوسطه الشهري.");
+  notes.push("الحالات المدروسة: الصور التي درسها أخصائي ضمان جودة الأشعة في كل شهر. النسبة: عدد الاشتباهات الفائتة أو الخاطئة في الشهر ÷ الحالات المدروسة في الشهر نفسه.");
   return bandTimelineInner(m, months, {
     eyebrow: S2,
     title: "الحالات المدروسة والاشتباهات الفائتة والخاطئة شهرياً",
     aria: "الخط الزمني للحالات المدروسة والاشتباهات",
     topTitle: "الحالات المدروسة (العينة)",
-    botTitle: "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)",
+    botTitle: "نسبة الاشتباهات الفائتة والخاطئة من الحالات المدروسة",
     series: [
       { label: "الحالات المدروسة", color: LINE_COLOR.all, band: "top", values: months.map((x0) => x0.studied), chipDy: -24, total: true },
-      { label: "الاشتباهات الفائتة", color: "var(--v3-red)", band: "bottom", values: months.map((x0) => x0.missed), chipDy: -24, total: true },
-      { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => x0.falseSuspicion), chipDy: 26, total: true },
+      { label: "نسبة الاشتباهات الفائتة", color: "var(--v3-red)", band: "bottom", values: months.map((x0) => share(x0.missed, x0.studied)), chipDy: -24, total: false, percent: `للفترة ${pct(totalOf("missed") / Math.max(1, totalOf("studied")))}` },
+      { label: "نسبة الاشتباهات الخاطئة", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => share(x0.falseSuspicion, x0.studied)), chipDy: 26, total: false, percent: `للفترة ${pct(totalOf("falseSuspicion") / Math.max(1, totalOf("studied")))}` },
     ],
     notes,
   });
@@ -718,15 +721,15 @@ function populationTimelineInner(m: PortReportModel, w: WorkloadSlideInput, eyeb
   const thinMonths = thin.length ? [`بيانات المجتمع في ملف المصدر غير مكتملة لشهر ${thin.join("، ")}.`] : [];
   return bandTimelineInner(m, months, {
     eyebrow,
-    title: "مجتمع الحالات الواردة وعدد الموظفين شهرياً",
+    title: "عدد صور الأشعة ومتوسط الموظفين في المنفذ شهرياً",
     aria: "الخط الزمني لمجتمع الحالات الواردة وعدد الموظفين",
-    topTitle: "مجتمع الحالات الواردة (الصور)",
-    botTitle: "عدد الموظفين في الشهر (دون تكرار)",
+    topTitle: "عدد صور الأشعة للمنفذ",
+    botTitle: "عدد الموظفين في المنفذ",
     series: [
-      { label: "مجتمع الحالات الواردة", color: LINE_COLOR.all, band: "top", values: months.map((x0) => x0.images), chipDy: -24, total: true },
-      { label: "عدد الموظفين في الشهر", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => x0.employees), chipDy: -24, total: false },
+      { label: "عدد صور الأشعة للمنفذ", color: LINE_COLOR.all, band: "top", values: months.map((x0) => x0.images), chipDy: -24, total: true },
+      { label: "متوسط الموظفين في المنفذ", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => x0.employees), chipDy: -24, total: false },
     ],
-    notes: [...thinMonths, "عدد الموظفين: كل موظف فحص صورة واحدة على الأقل في المنفذ خلال الشهر (المستوى الأول أو الثاني)، ويُحسب مرة واحدة في الشهر."],
+    notes: [...thinMonths, "الخط المتقطع لكل مؤشر: متوسطه الشهري.", "عدد الموظفين: كل موظف فحص صورة واحدة على الأقل في المنفذ خلال الشهر، ويُحسب مرة واحدة. المتوسط: مجموع أعداد الأشهر ÷ عدد الأشهر."],
   });
 }
 
@@ -740,16 +743,18 @@ function bandTimelineInner(m: PortReportModel, months: ReadonlyArray<{ monthKey:
   const x = (i: number) => W - padR - ((W - padL - padR) * i) / (months.length - 1);
   // Axis top: the next 1-1.2-1.6-2-2.4-3-4-5-6-8 step, so four grid lines land on round numbers without flattening the line.
   const nice = (v: number) => { const p = 10 ** Math.floor(Math.log10(Math.max(1, v))); return ([1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10].find((k) => k * p >= v) ?? 10) * p; };
+  const botPct = o.series.some((s0) => s0.band === "bottom" && s0.percent !== undefined);
   const bandVals = (band: BandSeries["band"]) => o.series.filter((s0) => s0.band === band).flatMap((s0) => s0.values).filter((v): v is number => v !== null);
   const imgMax = nice(Math.max(1, ...bandVals("top")) * 1.15);
-  const errMax = nice(Math.max(1, ...bandVals("bottom")) * 1.25);
+  // Percent axes step by whole 5s (20, 40, 60...) so the four grid lines read 5%, 10%, 15%.
+  const errMax = botPct ? Math.max(20, Math.ceil((Math.max(1, ...bandVals("bottom")) * 1.25) / 20) * 20) : nice(Math.max(1, ...bandVals("bottom")) * 1.25);
   const yT = (v: number) => topT + topH * (1 - v / imgMax);
   const yB = (v: number) => botT + botH * (1 - v / errMax);
   const grid: string[] = [];
   for (let g = 0; g <= 4; g++) {
     const vt = (imgMax * g) / 4, vb = (errMax * g) / 4;
     grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yT(vt).toFixed(1)}" y2="${yT(vt).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yT(vt) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vt))}</text>`);
-    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vb))}</text>`);
+    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${botPct ? `${Math.round(vb)}%` : fmtNum(Math.round(vb))}</text>`);
   }
   const series = o.series.map((s0) => ({ ...s0, y: s0.band === "top" ? yT : yB }));
   const bottom = series.filter((s0) => s0.band === "bottom");
@@ -771,11 +776,14 @@ function bandTimelineInner(m: PortReportModel, months: ReadonlyArray<{ monthKey:
             dy = v >= other ? -24 : 26;
             if (v === other && bi === 1) dy = 26;
           }
-          const t = fmtNum(v);
+          const t = ser.percent !== undefined ? `${v.toFixed(1)}%` : fmtNum(v);
           return chip(x(i), ser.y(v) + dy, t, ser.color, Math.max(40, 12 + t.length * 10));
         })
         .join("");
-      return `<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>${dots}${chips}`;
+      const kv = ser.values.filter((v): v is number => v !== null);
+      const avgY = kv.length ? ser.y(kv.reduce((a0, b0) => a0 + b0, 0) / kv.length).toFixed(1) : null;
+      const avgLine = avgY === null ? "" : `<line x1="${padL}" x2="${W - padR}" y1="${avgY}" y2="${avgY}" stroke="${ser.color}" stroke-width="2" stroke-dasharray="8 6" opacity="0.8"/>`;
+      return `${avgLine}<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>${dots}${chips}`;
     })
     .join("");
   const bandTitle = (y0: number, text: string) => `<text x="${W - padR - 8}" y="${y0}" text-anchor="start" font-size="22" font-weight="700" fill="var(--v3-navy)" direction="rtl">${esc(text)}</text>`;
@@ -799,8 +807,15 @@ function bandTimelineInner(m: PortReportModel, months: ReadonlyArray<{ monthKey:
   const svg = `<svg data-pptx-image viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="${esc(o.aria)}" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, o.topTitle)}${bandTitle(botT - 14, o.botTitle)}${lines}${monthLabels}</svg>`;
   const known = (vals: (number | null)[]) => vals.filter((v): v is number => v !== null);
   const total = (vals: (number | null)[]) => known(vals).reduce((a0, b0) => a0 + b0, 0);
+  const fmtV = (ser: (typeof series)[number], v: number) => (ser.percent !== undefined ? `${v.toFixed(1)}%` : fmtNum(v));
+  const ext = (ser: (typeof series)[number]) => {
+    let lo = -1, hi = -1;
+    ser.values.forEach((v, i) => { if (v === null) return; if (lo < 0 || v < (ser.values[lo] as number)) lo = i; if (hi < 0 || v > (ser.values[hi] as number)) hi = i; });
+    const mk = (i: number) => `${fmtV(ser, ser.values[i] as number)} (${Number(months[i].monthKey.slice(5))}/${months[i].monthKey.slice(0, 4)})`;
+    return lo < 0 ? "" : ` · الأدنى ${mk(lo)} · الأعلى ${mk(hi)}`;
+  };
   const legend = series
-    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">${ser.total ? `الإجمالي ${fmtNum(total(ser.values))} · ` : ""}المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / Math.max(1, known(ser.values).length)))}</span></div>`)
+    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">${ser.percent !== undefined ? ser.percent : `${ser.total ? `الإجمالي ${fmtNum(total(ser.values))} · ` : ""}المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / Math.max(1, known(ser.values).length)))}`}${ext(ser)}</span></div>`)
     .join("");
   const notes = o.notes;
   return `${head}

@@ -13,7 +13,7 @@ import { buildEmployeeRows, buildPortReportModel, employeeMinStudied, listReport
 import { buildPortReportHtml } from "./portReportHtml";
 import { buildPortObservations } from "./portObservations";
 import type { PortObservation } from "./portObservations";
-import { buildPortWorkloads, buildWorkloadTiers, LOAD_YEAR, outcomesByYear, outcomesFor, unratedPorts, workloadMeasure } from "./portWorkloadModel";
+import { buildPortWorkloads, buildVolumeTiers, LOAD_YEAR, outcomesByYear, outcomesFor, unratedPorts, workloadMeasure } from "./portWorkloadModel";
 import type { LevelOutcomes, WorkloadTierKey } from "./portWorkloadModel";
 import { groupTotals, workforceFigures } from "./portWorkloadSlides";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
@@ -92,7 +92,9 @@ export type PortReportBuild = {
  * the answers its employees gave at that level.
  */
 function accuracyGroups(studies: PortReportInput["studies"], selected: string): NonNullable<WorkloadSlideInput["accuracyGroups"]> {
-  const other = studies.filter((r) => r.port !== selected);
+  // Every studied employee, the selected port's included (owner, 2026-11-10).
+  void selected;
+  const other = studies;
   const rated = buildEmployeeRows(other);
   const minStudied = employeeMinStudied(rated);
   const eligible = rated.filter((e) => e.studied >= minStudied && e.accuracy !== null);
@@ -153,7 +155,8 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   const monthYears = [...new Set(months.map((x) => x.month.slice(0, 4)))].sort();
   const loadYear = monthYears.includes(LOAD_YEAR) ? LOAD_YEAR : monthYears.at(-1) ?? LOAD_YEAR;
   const portWorkloads = buildPortWorkloads(months, loadYear);
-  const tiers = buildWorkloadTiers(portWorkloads);
+  // Tiers by the port's own images a month (ports too small to rate are left out as before).
+  const tiers = buildVolumeTiers(portWorkloads.filter((p) => workloadMeasure(p) !== null), (p) => p.imagesPerMonth);
   const port = canon(opts.port);
   const outcomes = { selected: outcomesFor(input.studies, new Set([port])) } as Record<"selected" | WorkloadTierKey, LevelOutcomes>;
   for (const t of tiers) outcomes[t.key] = outcomesFor(input.studies, new Set(t.ports.map((p) => p.port).filter((p) => p !== port)));
@@ -189,7 +192,6 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
     else if (r.imageStatus === STATUS_FALSE_SUSPICION) v.falseSuspicion += 1;
   }
   // The same ports tiered by images received per month (thirds), and ports grouped by نسبة التوائم.
-  workload.imageTiers = buildWorkloadTiers(portWorkloads.filter((p) => workloadMeasure(p) !== null), (p) => p.imagesPerMonth);
   workload.accuracyGroups = accuracyGroups(input.studies, port);
   workload.monthlyCounts = [...mc.values()].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   // Yearly population for the appendix (images only; the source has no reliable suspicion split).
@@ -266,10 +268,8 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   sheets.splice(2 + wlSheets.length, 0,
     ["إجماليات مستويات العبء", ["المستوى", "إجمالي الصور", "متوسط الصور في الشهر", "إجمالي الموظفين المخصصين", "متوسط الموظفين في الشهر"], totals.map((t) => [t.label, t.images, round(t.imagesPerMonth), t.people, round(t.staffPerMonth)])],
     ["القوى العاملة حسب المستوى", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
-    ["القوى العاملة حسب حجم الصور", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload, workload.imageTiers ?? []).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
-    ["حدود أثلاث العبء", ["المستوى", "عدد المنافذ", "من (حالة للموظف في الشهر)", "إلى", "متوسط جميع المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]])])],
-    ["حدود أثلاث حجم الصور", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المنافذ"], (workload.imageTiers ?? []).map((t) => [t.label, t.ports.length, round(t.from), round(t.to), t.ports.map((p) => p.port).join("، ")])],
-    ["مستويات دقة الموظفين (المنافذ الأخرى)", ["المستوى", "من", "إلى", "الموظفون", "متوسط دقة الموظفين", "إجابات الأول", "نسبة التوائم - الأول", "الفائت - الأول", "الخاطئ - الأول", "إجابات الثاني", "نسبة التوائم - الثاني", "الفائت - الثاني", "الخاطئ - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.employees, pct(g.meanAccuracy), g.outcomes.l1.studied, pct(g.outcomes.l1.accuracy), g.outcomes.l1.missed, g.outcomes.l1.falseSuspicion, g.outcomes.l2.studied, pct(g.outcomes.l2.accuracy), g.outcomes.l2.missed, g.outcomes.l2.falseSuspicion])],
+    ["حدود مستويات العبء", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المتوسط المرجعي (دون الأحجام الاستثنائية)", "المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]]), t.ports.map((p) => p.port).join("، ")])],
+    ["مستويات دقة الموظفين", ["المستوى", "من", "إلى", "الموظفون", "متوسط دقة الموظفين", "إجابات الأول", "نسبة التوائم - الأول", "الفائت - الأول", "الخاطئ - الأول", "إجابات الثاني", "نسبة التوائم - الثاني", "الفائت - الثاني", "الخاطئ - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.employees, pct(g.meanAccuracy), g.outcomes.l1.studied, pct(g.outcomes.l1.accuracy), g.outcomes.l1.missed, g.outcomes.l1.falseSuspicion, g.outcomes.l2.studied, pct(g.outcomes.l2.accuracy), g.outcomes.l2.missed, g.outcomes.l2.falseSuspicion])],
     ["المستويان حسب مستوى العبء", ["النطاق", "المستوى", ...scHead], scopes.flatMap(([n, o]) => [[n, ...sc("المستوى الأول", o.l1)], [n, ...sc("المستوى الثاني", o.l2)]])],
     ["الأداء حسب السنة", ["السنة", "النطاق", "المستوى", ...scHead],
       workload.yearly.flatMap((y) => ([[workload.displayName, y.selected], ...workload.tiers.map((t) => [tierLabel(t), y.tiers[t.key]])] as Array<[string, LevelOutcomes | undefined]>)

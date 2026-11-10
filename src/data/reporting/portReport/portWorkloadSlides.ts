@@ -43,6 +43,8 @@ export type WorkloadSlideInput = {
 };
 
 const SEC = "تأثير عبء العمل على النتائج";
+/** How the workload tiers are set, in words (owner: the logic, no figures). */
+export const TIER_LOGIC = "يُحدَّد مستوى العبء حسب متوسط عدد الصور الواردة للمنفذ في الشهر. يُحسب متوسط مرجعي لجميع المنافذ بعد استبعاد المنافذ ذات الأحجام الاستثنائية المرتفعة جداً حتى لا ترفع المتوسط، ثم: المنفذ الذي تقل صوره عن هذا المتوسط عبؤه منخفض، والمنفذ الذي يزيد عليه دون أن يبلغ حد الأحجام الاستثنائية عبؤه متوسط، والمنفذ ذو الحجم الاستثنائي عبؤه عالٍ.";
 /** Page eyebrows: w1/w2 open القسم الأول, w3 closes القسم الثاني, and the year comparison (w5) is in ملحق ب. */
 const EYEBROW = { w1: "القسم الأول - أثر العبء التشغيلي على المنفذ", w2: "القسم الأول - أثر العبء التشغيلي على المنفذ", w3: "القسم الثاني - نتائج الدراسة", w5: "ملحق ب - نتائج الدراسة" } as const;
 const TONE: Record<WorkloadTierKey, ChartTone> = { low: "green", mid: "gold", high: "red" };
@@ -173,15 +175,14 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
         meta(key, SEC),
         "",
         `${contentHead({ eyebrow: EYEBROW.w1, title })}
-<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>
+${basis ? `<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>` : ""}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:22px">${cols}</div>
 <p class="v3-note" style="margin-top:10px;font-size:19px">${note}</p>`,
       ),
     );
   };
   const staffNote = `الموظفون: كل من فحص حالة واحدة على الأقل في المنفذ، ومتوسطهم عددهم في كل شهر. متوسط حالات الموظف: الموظفون الذين فحصوا أقل من ${Math.round(POOL_SHARE * 100)}% من متوسط الشهر تُجمع حالاتهم وتُحسب موظفين مكافئين. الصور من كامل الفترة، والموظفون والعبء من سنة ${esc(w.loadYear)}.`;
-  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>العبء التشغيلي:</b> ${L.examsMonth} في المنفذ في الشهر. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "عبء", "حالة للموظف في الشهر");
-  if (w.imageTiers?.length) tierPage(w.imageTiers, "w1b", "تأثير عبء التشغيل على نتائج العمل", "بناءً على عدد الصور في المنافذ", `<b>حجم الصور:</b> ${L.imagesMonth} في المنفذ. المنافذ البرية والبحرية معاً مرتبة حسبه ومقسومة ثلاثة أثلاث متساوية العدد: منخفض ومتوسط وعالي. ${staffNote}`, "حجم", "صورة في الشهر");
+  tierPage(w.tiers, "w1", "تأثير عبء التشغيل على نتائج العمل", "", `<b>طريقة تحديد مستوى العبء:</b> ${TIER_LOGIC} ${staffNote}`, "عبء", "صورة في الشهر");
 
   // 2 — Workforce distribution: images, staff and each employee's output per tier.
   const workforcePage = (tiers: WorkloadTier[], key: string, basis: string) => {
@@ -220,7 +221,7 @@ export function workloadSlides(w: WorkloadSlideInput, meta: (key: string, label:
         meta(key, SEC),
         "",
         `${contentHead({ eyebrow: EYEBROW.w2, title: "أثر توزيع القوى العاملة على الفحص بالأشعة" })}
-<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>
+${basis ? `<p style="margin:-14px 0 14px;font-size:24px;font-weight:700;color:var(--v3-muted)">(${esc(basis)})</p>` : ""}
 ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMonth, L.l1Month, L.l2Month], rows: rowsT, compactHeaders: true, rowPx: 50, firstColWidth: 26 })}
 <div class="v3-two-col" style="grid-template-columns:1.2fr .8fr;gap:40px;margin-top:20px">
   ${tintedPanel({ variant: "all", title: `${w.displayName} حسب السنة`, body: dataTable({ headers: ["السنة", L.images, L.imagesMonth, L.staff, L.staffMonth, L.examsMonth, "المستوى الأول", "المستوى الثاني"], rows: rowsY, compactHeaders: true, rowPx: 44, firstColWidth: 14 }) })}
@@ -230,8 +231,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       ),
     );
   };
-  workforcePage(w.tiers, "w2", "بناءً على عدد الصور في المنافذ");
-  if (w.imageTiers?.length) workforcePage(w.imageTiers, "w2b", "بناءً على عدد الصور في المنافذ");
+  workforcePage(w.tiers, "w2", "");
 
   // 3 — Level 1 and level 2 results by workload tier
   {
@@ -260,7 +260,7 @@ ${dataTable({ headers: ["النطاق", L.imagesMonth, L.staffMonth, L.examsMont
       slideShell(
         meta("w3", SEC),
         "",
-        `${contentHead({ eyebrow: EYEBROW.w3, title: "دقة المستوى الأول والثاني حسب مستوى الدقة", note: "موظفو المنافذ الأخرى في ثلاث فئات حسب دقة كل موظف" })}
+        `${contentHead({ eyebrow: EYEBROW.w3, title: "دقة المستوى الأول والثاني حسب مستوى الدقة", note: "جميع الموظفين المدروسة حالاتهم في ثلاث فئات حسب دقة كل موظف" })}
 <div class="v3-two-col pr-eq" style="grid-template-columns:repeat(4,1fr);gap:22px;align-items:stretch">${panels.map((p) => tintedPanel({ variant: p.variant, title: p.title, note: p.note, body: `<div style="font-size:19px;line-height:1.5;color:var(--v3-muted);margin:0 0 10px;min-width:0"><div>عدد الموظفين <b style="color:var(--v3-navy)">${fmtNum(p.staff)}</b></div><div>متوسط دقة الموظفين <b style="color:var(--v3-navy)">${pct(p.mean)}</b></div></div>${levelTable(p.o)}` })).join("")}</div>`,
       ),
     );
