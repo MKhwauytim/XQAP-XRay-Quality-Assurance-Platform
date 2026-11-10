@@ -36,6 +36,8 @@ export type WorkloadRead = {
   studyCodes?: Record<string, StudyCodes>;
 };
 /** An image's level-1 / level-2 employee code and name as the population records them. */
+/** One population row after de-duplication and the 2025 level correction (for the processed-data workbook). */
+export type PopulationRow = { id: string; day: string; port: string; type: string; c1: string; c2: string; r1: string; r2: string; suspicious: boolean; transit: boolean; sheet: string };
 export type StudyCodes = { c1?: string; n1?: string; c2?: string; n2?: string };
 
 /** «البيان» = ترانزيت marks a transit declaration. */
@@ -49,6 +51,8 @@ const CODE1 = ["كود موظف المستوى الأول"];
 const CODE2 = ["كود موظف المستوى الثاني"];
 // In the 2025 sheets the column headed level 1 holds the level-2 employee and the reverse (owner confirmed
 // 2026-11-10), so c1 reads CODE2_2025 and c2 reads CODE1_2025 there; see portReportSource SWAPPED_SOURCE.
+// The result columns are exchanged the same way: the 2025 «المستوى الثاني» column holds the preliminary
+// («مبدئي») result that 2026 records at level 1.
 const CODE1_2025 = ["موظف المستوى الاول", "موظف المستوى الأول"];
 const CODE2_2025 = ["موظف المستوى الثاني"];
 /** «اشتباه», «إشتباة», «اشتباه-فحص يدوي», «نتيجة اشتباه -مبدئي». */
@@ -81,7 +85,7 @@ type Acc = { port: string; type: string; month: string; images: number; suspicio
 type Cols = { id?: string; date?: string; port?: string; type?: string; c1?: string; c2?: string; n1?: string; n2?: string; r1?: string; r2?: string; decl?: string };
 
 /** Feed each sheet's rows in order; `result()` returns the months and a per-sheet report. */
-export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> } = {}) {
+export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string>; onRow?: (r: PopulationRow) => void } = {}) {
   const studyCodes: Record<string, StudyCodes> = {};
   const seen = new Set<string>();
   const acc = new Map<string, Acc>();
@@ -105,7 +109,7 @@ export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> 
         // The header is the first row holding the image id column.
         if (!Object.values(cells).some((v) => ID.includes(String(v).trim()))) return;
         const f = (hs: string[]) => Object.keys(cells).find((k) => hs.includes(String(cells[k]).trim()));
-        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE2_2025 : CODE1), c2: f(is2025 ? CODE1_2025 : CODE2), n1: is2025 ? undefined : f(CODE1_2025), n2: is2025 ? undefined : f(CODE2_2025), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
+        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE2_2025 : CODE1), c2: f(is2025 ? CODE1_2025 : CODE2), n1: is2025 ? undefined : f(CODE1_2025), n2: is2025 ? undefined : f(CODE2_2025), r1: f(is2025 ? RES2 : RES1), r2: f(is2025 ? RES1 : RES2), decl: f(["البيان"]) };
         return;
       }
       const at = (k?: string) => (k ? cells[k] : undefined);
@@ -137,6 +141,7 @@ export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> 
       }
       // An image is «اشتباه» when either level flagged it (2026 writes «نتيجة اشتباه -مبدئي»).
       const suspicious = SUSPICION.test(clean(at(col.r1))) || SUSPICION.test(clean(at(col.r2)));
+      if (opts.onRow) opts.onRow({ id, day, port, type: clean(at(col.type)), c1: ok1 ? c1 : "", c2: ok2 ? c2 : "", r1: clean(at(col.r1)), r2: clean(at(col.r2)), suspicious, transit, sheet: sheet.name });
       const key = `${port}|${day.slice(0, 7)}`;
       for (const m of transit ? [acc] : [acc, accNoTransit]) {
         let a = m.get(key);

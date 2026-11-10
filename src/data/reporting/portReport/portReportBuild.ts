@@ -98,6 +98,12 @@ export type PortReportBuild = {
   workload: WorkloadSlideInput;
   html: string;
   observations: PortObservation[];
+  /** The processed study rows the report counted (for the processed-data workbook). */
+  studies: PortReportInput["studies"];
+  /** Raw population port name → canonical name. */
+  portNames: Record<string, string>;
+  /** Whether a population month is inside the report (years, last month). */
+  keepMonth: (ym: string) => boolean;
 };
 
 /**
@@ -224,7 +230,9 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   const model = buildPortReportModel(input, port, opts.displayName ? { displayName: opts.displayName } : {});
   workload.selectedEmployeeMean = model.distribution.mean;
   workload.selectedEmployees = model.distribution.tiered;
-  return { model, workload, html: buildPortReportHtml(model, workload), observations: buildPortObservations(model, workload) };
+  const portNames = Object.fromEntries([...new Set(data.workloadMonths.map((x) => x.port))].map((p) => [p, canon(p)]));
+  const keepMonth = (ym: string) => inReportYears(ym) && (!opts.lastMonth || ym <= opts.lastMonth) && !excludeYears.has(ym.slice(0, 4));
+  return { model, workload, html: buildPortReportHtml(model, workload), observations: buildPortObservations(model, workload), studies: input.studies, portNames, keepMonth };
 }
 
 // ── The data workbook ───────────────────────────────────────────────────────────────────────────

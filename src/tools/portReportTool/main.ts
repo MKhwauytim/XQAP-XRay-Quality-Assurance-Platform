@@ -5,7 +5,7 @@
 // workbook is read in this page only.
 
 import JSZip from "jszip";
-import { buildPortReport, listPortsInData, monthRange, portReportSheets, portReportWorkbookBytes } from "../../data/reporting/portReport/portReportBuild";
+import { buildPortReport, listPortsInData, monthRange } from "../../data/reporting/portReport/portReportBuild";
 import type { PortReportBuild, PortReportData } from "../../data/reporting/portReport/portReportBuild";
 import { deckHtmlToPptx } from "../../data/reporting/executive/pptx/exportDeckPptx";
 import { downloadBlob } from "../../utils/downloadFile";
@@ -31,6 +31,8 @@ const status = $<HTMLParagraphElement>("status");
 const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-out]"));
 
 let data: PortReportData | null = null;
+/** The dropped workbook, kept so the processed-data workbook can stream its population sheets again. */
+let sourceFile: File | null = null;
 
 const MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const monthLabel = (ym: string) => `${MONTHS_AR[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
@@ -90,6 +92,7 @@ function showOptions(d: PortReportData): void {
 
 function readFile(file: File): void {
   data = null;
+  sourceFile = file;
   setBusy(true);
   options.hidden = true;
   progress.hidden = false;
@@ -110,10 +113,11 @@ function readFile(file: File): void {
       setStatus(`تعذرت قراءة الملف: ${m.message}`, "error");
       return;
     }
+    if (m.type !== "result") return;
     const wl = m.read.workload;
     data = { studyRows: m.read.studyRows, workloadMonths: wl.months, workloadMonthsNoTransit: wl.monthsNoTransit, transitIds: wl.transitIds, studyCodes: wl.studyCodes };
     transitField.hidden = !wl.transitIds?.length;
-    excludeTransit.checked = false;
+    excludeTransit.checked = true; // transit is left out unless the owner ticks it back in
     progressBar.style.width = "100%";
     progressText.textContent = `تمت قراءة الملف: ${m.read.studyRows.length.toLocaleString("en")} صف في «نتائج الدراسة»، و${m.read.workload.sheets.length} أوراق للمجتمع.`;
     showOptions(data);
@@ -161,15 +165,33 @@ function printPdf(r: PortReportBuild): void {
   });
 }
 
+/** The processed population and study rows by year-quarter (by month above 1,000,000 rows), with index and dashboards. */
+function dataWorkbook(r: PortReportBuild): Promise<Blob> {
+  if (!sourceFile || !data) return Promise.reject(new Error("لم يُقرأ ملف بعد"));
+  const months = [...new Set(data.workloadMonths.map((m) => m.month))].filter(r.keepMonth);
+  return new Promise((resolve, reject) => {
+    const worker = new ReadWorker();
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
+      const m = e.data;
+      if (m.type === "progress") { setStatus(`ملف البيانات: ${m.stage}…`); return; }
+      worker.terminate();
+      if (m.type === "dataXlsx") resolve(m.blob);
+      else reject(new Error(m.type === "error" ? m.message : "تعذر إعداد ملف البيانات"));
+    };
+    worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || "نفدت ذاكرة المتصفح")); };
+    worker.postMessage({ kind: "dataXlsx", file: sourceFile, studies: r.studies, portNames: r.portNames, months, excludeTransit: excludeTransit.checked });
+  });
+}
+
 async function run(out: string): Promise<void> {
   setBusy(true);
   try {
     setStatus("جارٍ إعداد التقرير…");
     const r = build();
     const name = baseName(r);
-    const xlsx = async () => new Blob([(await portReportWorkbookBytes(portReportSheets(r))) as Uint8Array<ArrayBuffer>], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const xlsx = () => dataWorkbook(r);
     if (out === "html") downloadBlob(new Blob([r.html], { type: "text/html;charset=utf-8" }), `${name}.html`);
-    else if (out === "xlsx") downloadBlob(await xlsx(), `${name}.xlsx`);
+    else if (out === "xlsx") downloadBlob(await xlsx(), `بيانات ${name}.xlsx`);
     else if (out === "pdf") printPdf(r);
     else if (out === "pptx") {
       setStatus("جارٍ إعداد ملف PowerPoint…");
@@ -178,7 +200,7 @@ async function run(out: string): Promise<void> {
       setStatus("جارٍ إعداد الملف المضغوط…");
       const zip = new JSZip();
       zip.file(`${name}.html`, r.html);
-      zip.file(`${name}.xlsx`, await xlsx());
+      zip.file(`بيانات ${name}.xlsx`, await xlsx());
       zip.file(`${name}.pptx`, (await deckHtmlToPptx(r.html, name, { minWeight: 500 })).blob);
       downloadBlob(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }), `${name}.zip`);
     }

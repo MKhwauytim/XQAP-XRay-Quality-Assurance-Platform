@@ -8,7 +8,7 @@
 import JSZip from "jszip";
 import { STUDY_ID_COLS, STUDY_SHEET } from "../../data/reporting/portReport/portReportSource";
 import { createWorkloadAggregator, isWorkloadSheet, orderWorkloadSheets } from "../../data/reporting/portReport/workloadAggregate";
-import type { WorkloadRead } from "../../data/reporting/portReport/workloadAggregate";
+import type { PopulationRow, WorkloadRead } from "../../data/reporting/portReport/workloadAggregate";
 
 export type WorkbookRead = { studyRows: unknown[][]; workload: WorkloadRead };
 export type ReadProgress = (stage: string, done: number, total: number) => void;
@@ -88,6 +88,20 @@ async function sharedStrings(zip: JSZip): Promise<string[]> {
   const out: string[] = [];
   for (const m of xml.matchAll(/<si>([\s\S]*?)<\/si>/g)) out.push(decode(m[1].replace(/<rPh[\s\S]*?<\/rPh>/g, "")));
   return out;
+}
+
+/** Streams the population sheets again, every kept row to `onRow` (same reading and de-duplication as the report). */
+export async function streamPopulation(data: ArrayBuffer, onRow: (r: PopulationRow) => void): Promise<void> {
+  const zip = await JSZip.loadAsync(data);
+  const sheets = await sheetEntries(zip);
+  const strings = await sharedStrings(zip);
+  const agg = createWorkloadAggregator({ onRow });
+  for (const [name, path] of orderWorkloadSheets(sheets.filter(([n]) => isWorkloadSheet(n)), ([n]) => n)) {
+    const f = zip.file(path);
+    if (!f) continue;
+    agg.startSheet(name);
+    await streamRows(f, strings, (cells) => agg.row(cells));
+  }
 }
 
 export async function readReportWorkbook(data: ArrayBuffer, progress: ReadProgress): Promise<WorkbookRead> {

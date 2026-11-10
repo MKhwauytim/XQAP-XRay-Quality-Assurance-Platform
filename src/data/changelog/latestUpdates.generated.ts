@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.18",
+    "date": "2026-11-10",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.18 2025 population sheets read with level-1 and level-2 employees exchanged back"
+  },
+  {
     "version": "v160.17",
     "date": "2026-11-10",
     "bucket": "fix",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "port report",
     "title": "v160.9 one method for workforce figures, tier ranges, second workforce slide, employee cut at 10% of the average"
-  },
-  {
-    "version": "v160.8",
-    "date": "2026-11-09",
-    "bucket": "fix",
-    "scope": "port report",
-    "title": "v160.8 tier tables line up, basis line under the tier titles"
   }
 ];
