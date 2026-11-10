@@ -47,6 +47,8 @@ const RES1 = ["نتيجة المستوى الأول", "نتيجة المستوى
 const RES2 = ["نتيجة المستوى الثاني", "المستوى الثاني"];
 const CODE1 = ["كود موظف المستوى الأول"];
 const CODE2 = ["كود موظف المستوى الثاني"];
+// In the 2025 sheets the column headed level 1 holds the level-2 employee and the reverse (owner confirmed
+// 2026-11-10), so c1 reads CODE2_2025 and c2 reads CODE1_2025 there; see portReportSource SWAPPED_SOURCE.
 const CODE1_2025 = ["موظف المستوى الاول", "موظف المستوى الأول"];
 const CODE2_2025 = ["موظف المستوى الثاني"];
 /** «اشتباه», «إشتباة», «اشتباه-فحص يدوي», «نتيجة اشتباه -مبدئي». */
@@ -103,7 +105,7 @@ export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> 
         // The header is the first row holding the image id column.
         if (!Object.values(cells).some((v) => ID.includes(String(v).trim()))) return;
         const f = (hs: string[]) => Object.keys(cells).find((k) => hs.includes(String(cells[k]).trim()));
-        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE1_2025 : CODE1), c2: f(is2025 ? CODE2_2025 : CODE2), n1: is2025 ? undefined : f(CODE1_2025), n2: is2025 ? undefined : f(CODE2_2025), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
+        col = { id: f(ID), date: f(DATE), port: f(["اسم المنفذ"]), type: f(["نوع المنفذ"]), c1: f(is2025 ? CODE2_2025 : CODE1), c2: f(is2025 ? CODE1_2025 : CODE2), n1: is2025 ? undefined : f(CODE1_2025), n2: is2025 ? undefined : f(CODE2_2025), r1: f(RES1), r2: f(RES2), decl: f(["البيان"]) };
         return;
       }
       const at = (k?: string) => (k ? cells[k] : undefined);
@@ -127,8 +129,7 @@ export function createWorkloadAggregator(opts: { codesFor?: ReadonlySet<string> 
       const ok2 = c2 !== "" && !NON_EMPLOYEE.has(c2.toUpperCase());
       if (ok1 || ok2) sheet.coded++;
       // Keep the population's employees for the studied images, so a study row without codes can be completed.
-      // Only the 2026-layout sheets, whose «كود موظف المستوى الأول/الثاني» headers are explicit: in the 2025
-      // sheets the level-1 and level-2 code columns hold the opposite code families (pending owner check).
+      // Only the 2026-layout sheets: they also carry the employee names next to the codes.
       if (id && !is2025 && (ok1 || ok2) && opts.codesFor?.has(id)) {
         const e = studyCodes[id] ?? (studyCodes[id] = {});
         if (ok1 && !e.c1) { e.c1 = c1; e.n1 = clean(at(col.n1)) || undefined; }
