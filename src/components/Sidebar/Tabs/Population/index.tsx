@@ -333,6 +333,10 @@ export default function PopulationTab() {
     activeSubTab === "browse"
   );
 
+  // The permission alone, not `canDistributeSamples`: that one also flips with
+  // the wizard's month-loading state, which would re-render Browse on every load.
+  // The write itself re-checks the month lock.
+  const canAddToSampleFromBrowse = canMutate("distribute-samples");
   const browseElement = useMemo(
     () => (
       <BrowseDataView
@@ -341,9 +345,10 @@ export default function PopulationTab() {
         username={sessionRef.current?.username ?? "unknown"}
         config={config}
         canExportReports={canExportReports}
+        canDistributeSamples={canAddToSampleFromBrowse}
       />
     ),
-    [directoryHandle, appliedBrowseRefreshKey, config, canExportReports]
+    [directoryHandle, appliedBrowseRefreshKey, config, canExportReports, canAddToSampleFromBrowse]
   );
 
   // Same stable-element trick Browse uses above, and for the same reason: this

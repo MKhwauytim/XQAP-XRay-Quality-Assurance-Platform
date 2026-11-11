@@ -4,6 +4,7 @@ import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 import type { DistributionEntry } from "../distribution/distributionTypes";
 import type { ItemAnswer } from "./answerTypes";
+import { originalXrayImageIdAnyImport } from "../adhocImport/adhocImportModel";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "قيد المراجعة",
@@ -55,7 +56,7 @@ export async function writeEmployeeXlsx(
     const r = e.row;
     const ans = answerMap.get(e.xrayImageId);
     const base: (string | null)[] = [
-      e.xrayImageId,
+      originalXrayImageIdAnyImport(e.xrayImageId),
       r.portName ?? "",
       r.certScanStatus,
       r.xrayEntryDate ?? "",

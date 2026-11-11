@@ -32,6 +32,7 @@ import {
   type DataRefreshFamily,
 } from "../../../../../../data/workspace/dataRefreshSignal";
 import { isReferral, isReplacement, requestKind, type CardRequest } from "./requestKind";
+import { originalXrayImageIdAnyImport } from "../../../../../../data/adhocImport/adhocImportModel";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type OpResult = { ok: true } | { ok: false; error: string };
@@ -557,9 +558,9 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
     }
     if (isReplacement(request)) {
-      return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+      return `${originalXrayImageIdAnyImport(request.originalXrayImageId)} → ${originalXrayImageIdAnyImport(request.replacementXrayImageId)}`;
     }
-    return `إعادة فتح ${request.xrayImageId}`;
+    return `إعادة فتح ${originalXrayImageIdAnyImport(request.xrayImageId)}`;
   }
 
   /**
