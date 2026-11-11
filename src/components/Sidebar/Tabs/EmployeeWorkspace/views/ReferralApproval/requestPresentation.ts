@@ -1,7 +1,7 @@
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
-import { originalXrayImageIdAnyImport } from "../../../../../../data/adhocImport/adhocImportModel";
+import { exportedXrayImageId } from "../../../../../../data/adhocImport/caseOrigin";
 import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 
 export type SampleDetail = DistributionEntry | PreparedPopulationRow;
@@ -79,8 +79,8 @@ export function detailSampleRows(request: CardRequest, details: SampleDetailMap)
 /** Headline shown on the queue card and again as the detail pane's title. */
 export function requestTitle(request: CardRequest, displayName: (username: string) => string): string {
   if (isReferral(request)) return `${displayName(request.fromEmployee)} ← ${displayName(request.toEmployee)}`;
-  if (isReplacement(request)) return `استبدال ${originalXrayImageIdAnyImport(request.originalXrayImageId)} بـ ${originalXrayImageIdAnyImport(request.replacementXrayImageId)}`;
-  return `إعادة فتح الحالة ${originalXrayImageIdAnyImport(request.xrayImageId)}`;
+  if (isReplacement(request)) return `استبدال ${exportedXrayImageId(request.originalXrayImageId)} بـ ${exportedXrayImageId(request.replacementXrayImageId)}`;
+  return `إعادة فتح الحالة ${exportedXrayImageId(request.xrayImageId)}`;
 }
 
 /** "n عينة" line under the title. */

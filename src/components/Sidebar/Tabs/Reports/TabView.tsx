@@ -89,9 +89,11 @@ const KNOWN_RAIL_SUB_TABS: ReadonlySet<string> = new Set<string>([
   "kpi",
   "report-designer",
   "comprehensive-executive",
+  "strategic-indicator",
 ]);
 
 const ComprehensiveExecutiveTab = lazy(() => import("./ComprehensiveExecutive"));
+const StrategicIndicatorTab = lazy(() => import("./StrategicIndicator/StrategicIndicator"));
 
 /**
  * The change families that actually invalidate what this tab shows: the month
@@ -1138,7 +1140,9 @@ export default function ReportsTab() {
           ? "report-designer"
           : canAccessTab("reports/comprehensive-executive")
             ? "comprehensive-executive"
-            : "reports"
+            : canAccessTab("reports/strategic-indicator")
+              ? "strategic-indicator"
+              : "reports"
         : "reports"
     )
   );
@@ -1155,6 +1159,10 @@ export default function ReportsTab() {
   const [visitedComprehensive, setVisitedComprehensive] = useState(activeSubTab === "comprehensive-executive");
   if (activeSubTab === "comprehensive-executive" && !visitedComprehensive) {
     setVisitedComprehensive(true);
+  }
+  const [visitedIndicator, setVisitedIndicator] = useState(activeSubTab === "strategic-indicator");
+  if (activeSubTab === "strategic-indicator" && !visitedIndicator) {
+    setVisitedIndicator(true);
   }
   const [visitedReportDesigner, setVisitedReportDesigner] = useState(activeSubTab === "report-designer");
   if (activeSubTab === "report-designer" && !visitedReportDesigner) {
@@ -1195,14 +1203,32 @@ export default function ReportsTab() {
     [labels]
   );
 
+  const indicatorElement = useMemo(
+    () => (
+      <TabGuard tabId="reports/strategic-indicator">
+        <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+          <StrategicIndicatorTab />
+        </Suspense>
+      </TabGuard>
+    ),
+    [labels]
+  );
+
   return (
     <>
-      <div hidden={activeSubTab === "report-designer" || activeSubTab === "comprehensive-executive"}>
+      <div
+        hidden={
+          activeSubTab === "report-designer" ||
+          activeSubTab === "comprehensive-executive" ||
+          activeSubTab === "strategic-indicator"
+        }
+      >
         <ReportsContent />
       </div>
       {visitedComprehensive && (
         <div hidden={activeSubTab !== "comprehensive-executive"}>{comprehensiveElement}</div>
       )}
+      {visitedIndicator && <div hidden={activeSubTab !== "strategic-indicator"}>{indicatorElement}</div>}
       {visitedReportDesigner && (
         <div hidden={activeSubTab !== "report-designer"}>{reportDesignerElement}</div>
       )}

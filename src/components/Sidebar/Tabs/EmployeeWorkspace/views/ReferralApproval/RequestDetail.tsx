@@ -1,7 +1,7 @@
 import { Check, X } from "lucide-react";
 import { useLabels } from "../../../../../../data/labels/useLabels";
 import RequestTimeline from "./RequestTimeline";
-import { originalXrayImageIdAnyImport } from "../../../../../../data/adhocImport/adhocImportModel";
+import { exportedXrayImageId } from "../../../../../../data/adhocImport/caseOrigin";
 import {
   KIND_LABELS,
   STATUS_BADGE_CLASS,
@@ -90,7 +90,7 @@ export default function RequestDetail(props: Props) {
               <div key={`${row.role ?? ""}-${row.xrayImageId}`} className="ew-approval-table-row">
                 <span className="ew-approval-table-id">
                   {row.role && <span className={`ew-approval-role ew-approval-role--${row.roleTone}`}>{row.role}</span>}
-                  <strong className="dt-mono">{originalXrayImageIdAnyImport(row.xrayImageId)}</strong>
+                  <strong className="dt-mono">{exportedXrayImageId(row.xrayImageId)}</strong>
                 </span>
                 <span>{row.portName}</span>
                 <span>{row.stage}</span>

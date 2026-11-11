@@ -9,7 +9,7 @@ import { DEFAULT_EXEC_CONFIG } from "../reporting/executiveReportTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { ExportManifest } from "./exportTypes";
 import { writeCsvExport } from "./exportWriter";
-import { originalXrayImageIdAnyImport } from "../adhocImport/adhocImportModel";
+import { caseOriginOf, exportedXrayImageId } from "../adhocImport/caseOrigin";
 
 const POPULATION_HEADERS = [
   "xrayImageId", "portName", "portType", "stage",
@@ -19,6 +19,8 @@ const POPULATION_HEADERS = [
   "lowQualityReason", "suspicionLevel", "suspectedTypes", "smuggleMethod",
   "answerStatus", "assignedAt", "submittedAt",
   "imageResultAccurate", "levelOneAccurate", "levelTwoAccurate", "verificationCategory",
+  // "index" or "exceptional"; xrayImageId is the source file id, without the storage prefix.
+  "caseOrigin",
 ];
 
 // A2: sample.csv (the file that carries snapshot rows) gets one extra column, at
@@ -57,8 +59,11 @@ export async function runPowerBiExportDetailed(
   // population.csv stays the population; sample.csv keeps them so their
   // answers are not lost.
   const snapshotRowCount = execRows.filter((r) => r.fromSampleSnapshot).length;
-  // Exceptional cases are stored under an `ADHOC-…` key; the file carries the id the operator knows.
-  const allRows: Record<string, unknown>[] = execRows.map((r) => ({ ...r, xrayImageId: originalXrayImageIdAnyImport(r.xrayImageId) }));
+  const allRows: Record<string, unknown>[] = execRows.map((r) => ({
+    ...r,
+    xrayImageId: exportedXrayImageId(r.xrayImageId),
+    caseOrigin: caseOriginOf(r.xrayImageId),
+  }));
   const populationRowsOut = snapshotRowCount > 0 ? allRows.filter((r) => r["fromSampleSnapshot"] !== true) : allRows;
   const sampleRowsOut = allRows.filter((r) => r["selectedInSample"] === true);
 

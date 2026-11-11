@@ -33,6 +33,7 @@ import type { CertScanFilter } from "../../../../../../data/population/certScanF
 import CertScanFilterChips from "../../../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanStatusFilterProps } from "../certScanColumn";
 import { displayXrayImageId } from "../../../../../../data/adhocImport/adhocImportEmployeeView";
+import { caseOriginLabel } from "../../../../../../data/adhocImport/caseOrigin";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
@@ -48,6 +49,7 @@ export const SELECT_COL_ID = "__select__";
 export function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
   { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
+  { id: "caseOrigin",             label: L.case_origin_column,            widthFr: 9,  filterKind: "multiselect", accessor: (e) => caseOriginLabel(e.xrayImageId) },
   { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
   { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  adminOnly: true,     accessor: (e) => (isUndistributedEntry(e) ? L.excel_rows_not_distributed : e.assignedTo) },
   { id: "portName",               label: L.col_port_name,                 widthFr: 13, accessor: (e) => e.row.portName },

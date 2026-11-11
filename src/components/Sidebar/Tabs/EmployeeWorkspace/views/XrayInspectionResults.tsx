@@ -67,12 +67,14 @@ import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import { certScanStatusFilterProps } from "./certScanColumn";
+import { loadAllMonthsResults } from "./allMonthsResults";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import ResultsTracking from "./ResultsTracking/ResultsTracking";
 import { classifyAnswerState, trackingDoneAt, type TrackingRow } from "../../../../../data/tracking/deadlineTracking";
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useTabActive } from "../../../../../app/tabActiveContext";
-import { originalXrayImageIdAnyImport } from "../../../../../data/adhocImport/adhocImportModel";
+import { caseOriginLabel, exportedXrayImageId } from "../../../../../data/adhocImport/caseOrigin";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -88,13 +90,14 @@ const REFERRALS_PRESET_KEY = "xray-referrals";
 const RESULTS_REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["requests", "distribution", "answers"];
 
 const SAMPLE_DEFAULT_VISIBLE = [
-  "xrayImageId", "movementStatus", "stage", "assignedTo", "movementFrom", "movementTo", "portName",
+  "xrayImageId", "caseOrigin", "movementStatus", "stage", "assignedTo", "movementFrom", "movementTo", "portName",
   "xrayEntryDate", "lastEventAt", "plateOrContainerNumber", "answerStatus", "submittedAt",
 ];
 
 function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
   return [
     { id: "xrayImageId",            label: L.col_xray_image_id,             widthFr: 20, alwaysVisible: true, filterKind: "text", accessor: (e) => displayXrayImageId(e) },
+    { id: "caseOrigin",             label: L.case_origin_column,            widthFr: 9,  filterKind: "multiselect", accessor: (e) => caseOriginLabel(e.xrayImageId) },
     { id: "movementStatus",         label: "حركة العينة",                   widthFr: 10, filterKind: "multiselect", accessor: () => null },
     { id: "stage",                  label: L.col_stage,                     widthFr: 8,  accessor: (e) => formatStageLabel(e.row.stage) },
     { id: "assignedTo",             label: L.col_xray_quality_expert,       widthFr: 9,  accessor: (e) => e.assignedTo },
@@ -136,10 +139,13 @@ type ResultRow = {
   entry: DistributionEntry;
   answer: ItemAnswer | null;
   movement: MovementInfo;
+  /** Set only in the all-months table: the month folder this row was read from, and where its writes go. */
+  monthFolder?: string;
 };
 
 function resultRowKey(row: ResultRow): string {
-  return `${row.entry.xrayImageId}::${row.entry.assignedTo}`;
+  const key = `${row.entry.xrayImageId}::${row.entry.assignedTo}`;
+  return row.monthFolder ? `${row.monthFolder}::${key}` : key;
 }
 
 type MovementInfo = {
@@ -214,6 +220,9 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const { months, selection: globalMonth } = useGlobalMonth();
   const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+  // A string, not the array: `loadData` depends on it and must not be rebuilt when
+  // the month list is re-created with the same folders.
+  const monthFoldersKey = useMemo(() => months.map((month) => month.folderName).join("|"), [months]);
   const [rows, setRows] = useState<ResultRow[]>([]);
   // Raw audit-log inputs (not the derived AuditRow[]) — buildAuditRows is a pure
   // filter over these driven by viewMode via the auditRows memo below, so toggling
@@ -223,6 +232,11 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
   const [auditReferralRequests, setAuditReferralRequests] = useState<ReferralRequest[]>([]);
   const [auditReplacementRequests, setAuditReplacementRequests] = useState<ReplacementRequest[]>([]);
   const [viewMode, setViewMode] = useState<ResultsViewMode>("active");
+  // «جميع النتائج في النظام»: every month's rows in one table. Oversight only,
+  // because a personal-scope viewer reads through the per-month mirror.
+  const [allMonthsRequested, setAllMonthsRequested] = useState(false);
+  const allMonths = allMonthsRequested && canSeeAll;
+  const [failedMonths, setFailedMonths] = useState<string[]>([]);
   // Page tabs: «المتابعة والمواعيد» is the landing tab for anyone who can see
   // the whole team; the results table is the second tab. A viewer limited to
   // their own rows has no team to track, so they only get the table.
@@ -328,7 +342,10 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
   const loadTokenRef = useRef(0);
-  const loadData = useCallback(async (opts?: { silent?: boolean; refreshPending?: boolean }) => {
+  const loadData = useCallback(async (opts?: { silent?: boolean; refreshPending?: boolean; force?: boolean }) => {
+    // The all-months table is a snapshot: a background refresh would re-read every
+    // month on the share. Only an action on one of its own rows (`force`) reloads it.
+    if (allMonths && opts?.silent && !opts.force) return;
     const token = ++loadTokenRef.current;
     if (!selectedMonth) return;
     // `silent` is set only by the background/manual data-refresh signal below, never
@@ -346,6 +363,19 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       setReopenError(null);
     }
     try {
+      if (allMonths) {
+        const all = await loadAllMonthsView(directoryHandle, monthFoldersKey.split("|").filter(Boolean), username);
+        if (token !== loadTokenRef.current) return;
+        setTemplate(all.activeTemplate);
+        setTemplatesById(all.templatesById);
+        setRows(all.rows);
+        setAuditEvents(all.events);
+        setAuditReferralRequests(all.referralRequests);
+        setAuditReplacementRequests(all.replacementRequests);
+        setFailedMonths(all.failedMonths);
+        setLoadState("ready");
+        return;
+      }
       const [selection, referralLog, replacementLog, adhocEntries, personalMirror, logStamp] = await Promise.all([
         loadInspectionTemplateSelection(directoryHandle),
         loadReferralLog(directoryHandle, selectedMonth),
@@ -471,6 +501,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       setAuditEvents(log.events);
       setAuditReferralRequests(referralLog.requests);
       setAuditReplacementRequests(replacementLog.requests);
+      setFailedMonths([]);
       setLoadState("ready");
     } catch (err) {
       if (token !== loadTokenRef.current) return;
@@ -484,7 +515,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       }
       setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, selectedMonth, username]);
+  }, [allMonths, canSeeAll, directoryHandle, monthFoldersKey, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -658,8 +689,17 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       accessor: (row) => row.answer?.qualityNote ?? null,
     };
 
-    return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
-  }, [L, answerFields, referralColConfig, sampleColumns, stageMappings, template, templatesById]);
+    // Only the all-months table needs it: in a single month every row would say the same.
+    const monthColumn: DataTableCol<ResultRow> = {
+      id: "resultMonth",
+      label: L.xray_results_col_month,
+      widthFr: 9,
+      filterKind: "multiselect",
+      accessor: (row) => (row.monthFolder ? formatMonthFolderShortLabel(row.monthFolder) : null),
+    };
+
+    return [...(allMonths ? [monthColumn] : []), ...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
+  }, [L, allMonths, answerFields, referralColConfig, sampleColumns, stageMappings, template, templatesById]);
 
   /**
    * What the table shows before anyone touches its picker: exactly the columns
@@ -670,11 +710,12 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
    */
   const defaultVisibleColumns = useMemo(
     () => [
+      ...(allMonths ? ["resultMonth"] : []),
       ...defaultVisibleSampleColumnIds(sampleColumns, referralColConfig),
       ...answerFields.map((field) => `answer:${normalizeFieldLabel(field.label)}`),
       "qualityNote",
     ],
-    [answerFields, referralColConfig, sampleColumns]
+    [allMonths, answerFields, referralColConfig, sampleColumns]
   );
 
   const auditColumns = useMemo<DataTableCol<AuditRow>[]>(() => buildAuditColumns(), []);
@@ -723,7 +764,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       // shared `monthFolderForEntry` helper rather than another local branch.
       const result = await setItemQualityNote(
         directoryHandle,
-        monthFolderForEntry(row.entry, selectedMonth),
+        monthFolderForEntry(row.entry, row.monthFolder ?? selectedMonth),
         row.entry.assignedTo,
         row.entry.xrayImageId,
         note
@@ -737,13 +778,13 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
       // clearing a note is still an oversight action, so `cleared` is recorded
       // rather than the note text being dropped from the trail.
       recordAction(directoryHandle, username, session?.role ?? "unknown", "answer-quality-note-set", {
-        monthFolderName: monthFolderForEntry(row.entry, selectedMonth),
+        monthFolderName: monthFolderForEntry(row.entry, row.monthFolder ?? selectedMonth),
         target: row.entry.xrayImageId,
         details: { employee: row.entry.assignedTo, cleared: trimmed.length === 0 },
       });
       setRows((prev) =>
         prev.map((r) =>
-          r.entry.xrayImageId === row.entry.xrayImageId && r.entry.assignedTo === row.entry.assignedTo && r.answer
+          r.monthFolder === row.monthFolder && r.entry.xrayImageId === row.entry.xrayImageId && r.entry.assignedTo === row.entry.assignedTo && r.answer
             ? { ...r, answer: { ...r.answer, qualityNote: trimmed.length > 0 ? trimmed : undefined } }
             : r
         )
@@ -776,7 +817,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     try {
       const result = await reopenSubmittedAnswer({
         directoryHandle,
-        monthFolderName: monthFolderForEntry(row.entry, selectedMonth),
+        monthFolderName: monthFolderForEntry(row.entry, row.monthFolder ?? selectedMonth),
         employeeUsername: row.entry.assignedTo,
         xrayImageId: row.entry.xrayImageId,
         reopenedBy: username,
@@ -788,7 +829,7 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         return;
       }
       setExpandedRowKey(null);
-      await loadData({ silent: true });
+      await loadData({ silent: true, force: true });
       // Tell the other mounted views — this can flip an answer to draft,
       // return a completed distribution entry to pending, and (reopenAnswer.ts's
       // own auto-resolve sweep) silently settle a request the employee filed
@@ -847,6 +888,25 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
     return <span className="dt-cell">{value}</span>;
   }
 
+  const resultsToolbar = (
+    <>
+      {canSeeAll && (
+        <div className="ew-view-switcher" role="group" aria-label={L.xray_results_all_months}>
+          <button
+            type="button"
+            className={`ew-view-seg${allMonths ? " active" : ""}`}
+            aria-pressed={allMonths}
+            title={L.xray_results_all_months_title}
+            onClick={() => setAllMonthsRequested((on) => !on)}
+          >
+            {L.xray_results_all_months}
+          </button>
+        </div>
+      )}
+      {renderViewSwitcher(viewMode, setViewMode)}
+    </>
+  );
+
   return (
     <section className="page-shell ew-page" dir="rtl">
       <PageHeader
@@ -868,7 +928,11 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
             role="tab"
             className="trk-tab"
             aria-selected={activeTab === "tracking"}
-            onClick={() => setPageTab("tracking")}
+            onClick={() => {
+              // The tracking tab is per month (deadlines, daily counts).
+              setAllMonthsRequested(false);
+              setPageTab("tracking");
+            }}
           >
             {L.tracking_tab_title}
           </button>
@@ -905,6 +969,11 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
         />
       )}
 
+      {activeTab === "results" && loadState === "ready" && allMonths && failedMonths.length > 0 && (
+        <p className="ew-msg-warn" role="status">
+          {L.xray_results_all_months_failed.replace("{months}", failedMonths.map(formatMonthFolderShortLabel).join("، "))}
+        </p>
+      )}
       {activeTab === "results" && loadState === "ready" && months.length > 0 && viewMode === "active" && rows.length === 0 && (
         <EmptyState title={L.xray_results_no_rows} />
       )}
@@ -924,12 +993,12 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
           canConfigureColumns
           initialColConfig={resultsPreset.initialColConfig}
           onColConfigChange={resultsPreset.onColConfigChange}
-          exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          exportFileName={`نتائج فحص الأشعة - ${allMonths ? L.xray_results_all_months : selectedMonth || "كل الأشهر"}.xlsx`}
           // The only user action that makes these rows a different set: picking
           // another month. A background re-read of the same month must leave the
           // reader where they were.
-          resetToken={selectedMonth}
-          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+          resetToken={allMonths ? "__all-months__" : selectedMonth}
+          toolbarEndExtra={resultsToolbar}
           expandedKey={expandedRowKey}
           onRowClick={(row) => {
             const key = resultRowKey(row);
@@ -973,15 +1042,76 @@ export default function XrayInspectionResults({ directoryHandle, active = true, 
           canConfigureColumns
           initialColConfig={auditPreset.initialColConfig}
           onColConfigChange={auditPreset.onColConfigChange}
-          exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${allMonths ? L.xray_results_all_months : selectedMonth || "كل الأشهر"}.xlsx`}
           // Same as the active table, plus the history kind: the switcher folds
           // a different slice of `auditEvents` into an unrelated row set.
-          resetToken={`${selectedMonth}::${viewMode}`}
-          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+          resetToken={`${allMonths ? "__all-months__" : selectedMonth}::${viewMode}`}
+          toolbarEndExtra={resultsToolbar}
         />
       )}
     </section>
   );
+}
+
+/**
+ * The all-months table's read, joined into rows. Each month keeps its own
+ * movement map and answer map, so a row is matched only against its own month.
+ * Exceptional-case stores are read once, unscoped; their rows carry no month.
+ * Lives outside the component to keep `loadData` inside its complexity budget.
+ */
+async function loadAllMonthsView(directoryHandle: DirectoryHandleLike, monthFolders: string[], username: string) {
+  const [selection, all, adhocEntries] = await Promise.all([
+    loadInspectionTemplateSelection(directoryHandle),
+    loadAllMonthsResults(directoryHandle, monthFolders),
+    loadAdhocEntriesForEmployeeView(directoryHandle, username, true).catch((err) => {
+      logError("xrayInspectionResults:loadAdhocEntries", err);
+      return [];
+    }),
+  ]);
+  const activeTemplate = selection?.templateId ? await loadTemplate(directoryHandle, selection.templateId) : null;
+  const adhocAnswerItems = await loadAdhocAnswerItems(directoryHandle, adhocEntries);
+  const answerKey = (item: ItemAnswer) => `${item.xrayImageId}::${item.answeredBy}`;
+  const rows: ResultRow[] = [];
+  const answers: ItemAnswer[] = [];
+  for (const bundle of all.bundles) {
+    const movementById = buildMovementMap(bundle.events);
+    const answerByKey = new Map<string, ItemAnswer>();
+    for (const item of bundle.answerItems) {
+      answerByKey.set(answerKey(item), item);
+      answers.push(item);
+    }
+    for (const entry of bundle.entries) {
+      if (entry.status === "replaced") continue;
+      rows.push({
+        entry,
+        movement: buildMovementInfo(entry, movementById.get(entry.xrayImageId)),
+        answer: answerByKey.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null,
+        monthFolder: bundle.monthFolder,
+      });
+    }
+  }
+  const adhocAnswerByKey = new Map<string, ItemAnswer>();
+  for (const item of adhocAnswerItems) {
+    adhocAnswerByKey.set(answerKey(item), item);
+    answers.push(item);
+  }
+  for (const entry of adhocEntries) {
+    if (entry.status === "replaced") continue;
+    rows.push({
+      entry,
+      movement: buildMovementInfo(entry, undefined),
+      answer: adhocAnswerByKey.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null,
+    });
+  }
+  return {
+    rows,
+    activeTemplate,
+    templatesById: await resolveAnswerTemplates(directoryHandle, activeTemplate, answers),
+    events: all.bundles.flatMap((bundle) => bundle.events),
+    referralRequests: all.bundles.flatMap((bundle) => bundle.referralRequests),
+    replacementRequests: all.bundles.flatMap((bundle) => bundle.replacementRequests),
+    failedMonths: all.failedMonths,
+  };
 }
 
 function renderViewSwitcher(
@@ -1169,9 +1299,9 @@ function buildAuditColumns(): DataTableCol<AuditRow>[] {
   return [
     { id: "kind", label: "النوع", widthFr: 9, accessor: (row) => row.kind === "replacement" ? "استبدال" : "إحالة/نقل" },
     { id: "status", label: "الحالة", widthFr: 8, accessor: (row) => getAuditStatusLabel(row.status) },
-    { id: "xrayImageId", label: "معرف الأشعة", widthFr: 17, alwaysVisible: true, filterKind: "text", accessor: (row) => originalXrayImageIdAnyImport(row.xrayImageId) },
-    { id: "originalXrayImageId", label: "العينة الأصلية", widthFr: 17, filterKind: "text", accessor: (row) => row.originalXrayImageId && originalXrayImageIdAnyImport(row.originalXrayImageId) },
-    { id: "replacementXrayImageId", label: "العينة البديلة", widthFr: 17, filterKind: "text", accessor: (row) => row.replacementXrayImageId && originalXrayImageIdAnyImport(row.replacementXrayImageId) },
+    { id: "xrayImageId", label: "معرف الأشعة", widthFr: 17, alwaysVisible: true, filterKind: "text", accessor: (row) => exportedXrayImageId(row.xrayImageId) },
+    { id: "originalXrayImageId", label: "العينة الأصلية", widthFr: 17, filterKind: "text", accessor: (row) => row.originalXrayImageId && exportedXrayImageId(row.originalXrayImageId) },
+    { id: "replacementXrayImageId", label: "العينة البديلة", widthFr: 17, filterKind: "text", accessor: (row) => row.replacementXrayImageId && exportedXrayImageId(row.replacementXrayImageId) },
     { id: "fromEmployee", label: "من", widthFr: 10, accessor: (row) => row.fromEmployee },
     { id: "toEmployee", label: "إلى", widthFr: 10, accessor: (row) => row.toEmployee },
     { id: "reason", label: "السبب", widthFr: 22, filterKind: "text", accessor: (row) => row.reason },

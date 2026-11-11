@@ -122,6 +122,12 @@ export const SYSTEM_FOLDER_NAMES = {
    * history). See that module's doc comment for the full distinction.
    */
   history: "history",
+  /**
+   * Strategic indicator follow-up (owner requirement, 2026-11-10): the owner's
+   * indicator workbook, kept as the export template, and the summary read from
+   * it. See `src/data/strategicIndicator/`.
+   */
+  strategicIndicator: "strategic-indicator",
 } as const;
 
 export const REPORTS_SUBFOLDERS = {
@@ -866,6 +872,21 @@ export async function getNotificationAcksDir(
     `${WORKSPACE_ROOTS.system}/${SYSTEM_FOLDER_NAMES.notifications}`,
     () => getNotificationsDir(directoryHandle, create),
     NOTIFICATIONS_SUBFOLDERS.acks,
+    create,
+    null
+  );
+}
+
+/** `5-system/strategic-indicator/` — see `SYSTEM_FOLDER_NAMES.strategicIndicator`. */
+export async function getStrategicIndicatorDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getChildDir(
+    directoryHandle,
+    WORKSPACE_ROOTS.system,
+    () => getSystemRoot(directoryHandle, create),
+    SYSTEM_FOLDER_NAMES.strategicIndicator,
     create,
     null
   );
