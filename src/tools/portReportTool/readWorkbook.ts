@@ -6,9 +6,9 @@
 // scripts/lib/workloadSheets.mjs; both feed workloadAggregate.ts.
 
 import JSZip from "jszip";
-import { STUDY_SHEET } from "../../data/reporting/portReport/portReportSource";
+import { STUDY_ID_COLS, STUDY_SHEET } from "../../data/reporting/portReport/portReportSource";
 import { createWorkloadAggregator, isWorkloadSheet, orderWorkloadSheets } from "../../data/reporting/portReport/workloadAggregate";
-import type { WorkloadRead } from "../../data/reporting/portReport/workloadAggregate";
+import type { PopulationRow, WorkloadRead } from "../../data/reporting/portReport/workloadAggregate";
 
 export type WorkbookRead = { studyRows: unknown[][]; workload: WorkloadRead };
 export type ReadProgress = (stage: string, done: number, total: number) => void;
@@ -90,6 +90,20 @@ async function sharedStrings(zip: JSZip): Promise<string[]> {
   return out;
 }
 
+/** Streams the population sheets again, every kept row to `onRow` (same reading and de-duplication as the report). */
+export async function streamPopulation(data: ArrayBuffer, onRow: (r: PopulationRow) => void): Promise<void> {
+  const zip = await JSZip.loadAsync(data);
+  const sheets = await sheetEntries(zip);
+  const strings = await sharedStrings(zip);
+  const agg = createWorkloadAggregator({ onRow });
+  for (const [name, path] of orderWorkloadSheets(sheets.filter(([n]) => isWorkloadSheet(n)), ([n]) => n)) {
+    const f = zip.file(path);
+    if (!f) continue;
+    agg.startSheet(name);
+    await streamRows(f, strings, (cells) => agg.row(cells));
+  }
+}
+
 export async function readReportWorkbook(data: ArrayBuffer, progress: ReadProgress): Promise<WorkbookRead> {
   progress("فتح الملف", 0, 1);
   const zip = await JSZip.loadAsync(data);
@@ -114,7 +128,10 @@ export async function readReportWorkbook(data: ArrayBuffer, progress: ReadProgre
     studyRows.push(row);
   });
 
-  const agg = createWorkloadAggregator();
+  // Studied image ids, so the population pass keeps their employee codes (study rows without codes are completed from it).
+  const idCol = (studyRows[0] ?? []).findIndex((h) => STUDY_ID_COLS.includes(String(h ?? "").trim()));
+  const codesFor = new Set<string>(idCol < 0 ? [] : studyRows.slice(1).map((r) => String(r[idCol] ?? "").trim()).filter(Boolean));
+  const agg = createWorkloadAggregator({ codesFor });
   for (let i = 0; i < workloadSheets.length; i++) {
     const [name, path] = workloadSheets[i];
     progress(`قراءة ورقة ${name}`, i + 1, total);

@@ -27,8 +27,8 @@ import type { ChartTone } from "../executive/deck3/chartKit";
 import { esc, fmtNum } from "../executive/primitives";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../branding/organization";
 import type { AccuracyTier, OutcomeStats, PortReportModel, ScopeSummary } from "./portReportModel";
-import { MIN_TIER_SAMPLE } from "./portReportModel";
-import { workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
+import { employeeMinStudied } from "./portReportModel";
+import { TIER_LOGIC, workloadAppendixSlide, workloadSlides } from "./portWorkloadSlides";
 import { buildPortObservations } from "./portObservations";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
 
@@ -60,15 +60,16 @@ const PCT_AXIS = { min: 0, max: 110 };
 const p100 = (v: number | null): number | null => (v === null ? null : v * 100);
 
 /** The outcome columns every results table shares, in the owner's order. */
-const OUTCOME_HEADERS = ["المدروسة", "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ", AGREEMENT];
+// «اشتباه صحيح» and «سليمة صحيحة» are left out (owner, 2026-11-08). Each error count carries its share of
+// the studied images, so the missed share + the false share + نسبة التوائم add up to 100%.
+const OUTCOME_HEADERS = ["المدروسة", "الاشتباه الفائت", "الاشتباه الخاطئ", AGREEMENT];
+const withShare = (n: number, of: number) => `${fmtNum(n)} <span class="v3-sub" style="font-size:16px;color:var(--v3-muted)">(${pct(rate(n, of))})</span>`;
 function outcomeCells(label: string, o: OutcomeStats): TableCell[] {
   return [
     { html: esc(label) },
     { html: fmtNum(o.studied), cls: "v-navy" },
-    { html: fmtNum(o.trueSuspicion), cls: "v-green" },
-    { html: fmtNum(o.trueClear), cls: "v-green" },
-    { html: fmtNum(o.missed), cls: "v-red" },
-    { html: fmtNum(o.falseSuspicion), cls: "v-gold" },
+    { html: withShare(o.missed, o.studied), cls: "v-red" },
+    { html: withShare(o.falseSuspicion, o.studied), cls: "v-gold" },
     { html: pct(o.accuracy), cls: "v-navy" },
   ];
 }
@@ -108,6 +109,7 @@ const W1 = "أثر العبء التشغيلي على المنفذ";
 export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSlideInput): string {
   const footText = `تقرير أعمال ${m.displayName} · ${m.periodLabel}`;
   // Employees below the tiering threshold are left out of the list too, as on the tiers page.
+  const MIN_TIER_SAMPLE = employeeMinStudied(m.employees);
   const staff = m.employees.filter((e) => e.studied >= MIN_TIER_SAMPLE);
   const excluded = m.employees.filter((e) => e.studied < MIN_TIER_SAMPLE);
   const pagesOf = (n: number) => Math.max(1, Math.ceil(n / EMPLOYEE_ROWS_PER_PAGE));
@@ -172,7 +174,6 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
           dotTone: "red",
           title: "مصطلحات النتائج",
           terms: [
-            { term: "اشتباه صحيح / سليمة صحيحة", definition: "نتيجة اشتباه أو سليمة وافقها أخصائي ضمان جودة الأشعة." },
             { term: "الاشتباه الفائت", definition: MISSED_DEFINITION },
             { term: "الاشتباه الخاطئ", definition: FALSE_DEFINITION },
           ],
@@ -194,8 +195,8 @@ export function buildPortReportSlides(m: PortReportModel, workload?: WorkloadSli
               { term: "الموظف المخصص للمنفذ", definition: "كل من فحص حالة واحدة على الأقل في المنفذ. الإجمالي: عددهم دون تكرار؛ والمتوسط: عددهم في كل شهر." },
               { term: "متوسط عدد الحالات المفحوصة للموظف الواحد", definition: "حالات المنفذ في الشهر ÷ موظفيه، مع جمع حالات من فحص أقل من عُشر المتوسط واحتسابهم موظفين مكافئين." },
               { term: "متوسط الحالات للموظف في الشهر حسب المستوى", definition: "حالات المستوى الأول ÷ موظفي المستوى الأول المخصصين في الشهر، وكذلك المستوى الثاني، بنفس قاعدة الموظف المخصص." },
-              { term: "مستوى العبء التشغيلي", definition: "المنافذ البرية والبحرية معاً مرتبة حسب حالات الموظف (أو الصور في الشهر) ومقسومة ثلاثة أثلاث متساوية: منخفض ومتوسط وعالي." },
-              { term: "مستوى الدقة", definition: "المنافذ التي دُرس منها 30 صورة فأكثر، مرتبة حسب نسبة التوائم ومقسومة ثلاثة أثلاث." },
+              { term: "مستوى العبء التشغيلي", definition: TIER_LOGIC },
+              { term: "مستوى الدقة", definition: "موظفو المنافذ الأخرى (10% من متوسط الحالات المدروسة للموظف فأكثر، على إجاباتهم في تلك المنافذ) في ثلاث فئات متساوية المدى بين أقل نسبة توائم وأعلاها: منخفضة ومتوسطة وعالية. موظفو المنفذ المختار يُعرضون مستقلين." },
             ],
           },
         ],
@@ -340,10 +341,8 @@ ${chart}
       { html: strong ? `<b>${esc(label)}</b>` : esc(label) },
       { html: fmtNum(o.studied), cls: "v-navy" },
       { html: pct(o.accuracy), cls: "v-navy" },
-      { html: fmtNum(o.trueSuspicion), cls: "v-green" },
-      { html: fmtNum(o.trueClear), cls: "v-green" },
-      { html: fmtNum(o.missed), cls: "v-red" },
-      { html: fmtNum(o.falseSuspicion), cls: "v-gold" },
+      { html: withShare(o.missed, o.studied), cls: "v-red" },
+      { html: withShare(o.falseSuspicion, o.studied), cls: "v-gold" },
     ];
     b("results").push(
       slideShell(
@@ -353,7 +352,7 @@ ${chart}
 <div class="v3-two-col" style="grid-template-columns:1fr 1.25fr;gap:56px">
   <div class="v3-chart-col">${chartTitleRow({ title: `${AGREEMENT} حسب نوع المنفذ` })}${chart}</div>
   <div style="${RULE}display:flex;flex-direction:column">${chartTitleRow({ title: "التفصيل حسب نوع المنفذ" })}<div style="height:560px;display:flex">${dataTable({
-    headers: ["نوع المنفذ", "المدروسة", AGREEMENT, "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ"],
+    headers: ["نوع المنفذ", "المدروسة", AGREEMENT, "الاشتباه الفائت", "الاشتباه الخاطئ"],
     rows: types.map((g) => row(g.label, g.image, g.label === m.group)),
     totals: row("جميع المنافذ", a.image),
     groupStart: 3,
@@ -436,15 +435,21 @@ ${chart}
     const chart = groupedBarChart({
       groups: groups.map((g) => ({ label: g.label, a: { label: "", value: p100(g.l1.accuracy) }, b: { label: "", value: p100(g.l2.accuracy) } })),
       ...PCT_AXIS,
-      plotHeight: 320,
+      plotHeight: 250,
       groupWidthPct: 26,
     });
+    // Each error count with its share of that level's studied answers beneath it.
+    const share = (n: number, of: number) => `${fmtNum(n)}<br><span class="v3-sub" style="font-size:15px;color:var(--v3-muted)">(${pct(of ? n / of : null)})</span>`;
     const rows: TableCell[][] = groups.map((g) => [
       { html: g.label === m.group ? `<b>${esc(g.label)}</b>` : g.label === "منفذ بحري" ? `منفذ بحري <span class="v3-sub">(دون ${esc(m.displayName)})</span>` : esc(g.label) },
       { html: fmtNum(g.l1.studied), cls: "v-navy" },
       { html: pct(g.l1.accuracy), cls: "v-gold" },
+      { html: share(g.l1.missed, g.l1.studied), cls: "v-red" },
+      { html: share(g.l1.falseSuspicion, g.l1.studied), cls: "v-gold" },
       { html: fmtNum(g.l2.studied), cls: "v-navy" },
       { html: pct(g.l2.accuracy), cls: "v-navy" },
+      { html: share(g.l2.missed, g.l2.studied), cls: "v-red" },
+      { html: share(g.l2.falseSuspicion, g.l2.studied), cls: "v-gold" },
     ]);
         b("staffVs").push(
       slideShell(
@@ -453,7 +458,7 @@ ${chart}
         `${contentHead({ eyebrow: SEC3, title: `أداء منسوبي ${m.displayName} مقارنة بالمنافذ البرية والبحرية` })}
 ${legendRow([{ swatch: "gold", text: `${AGREEMENT} - المستوى الأول` }, { swatch: "blue", text: `${AGREEMENT} - المستوى الثاني` }])}
 ${chart}
-<div style="margin-top:22px">${dataTable({ headers: ["نوع المنفذ", "إجابات المستوى الأول", `${AGREEMENT} - الأول`, "إجابات المستوى الثاني", `${AGREEMENT} - الثاني`], rows, groupStart: 3, compactHeaders: true, rowPx: 50 })}</div>
+<div style="margin-top:22px">${dataTable({ topHeader: [{ label: "", span: 1 }, { label: "المستوى الأول", span: 4, group: true }, { label: "المستوى الثاني", span: 4, group: true }], headers: ["نوع المنفذ", "الإجابات", AGREEMENT, "عدد الاشتباهات الفائتة", "عدد الاشتباهات الخاطئة", "الإجابات", AGREEMENT, "عدد الاشتباهات الفائتة", "عدد الاشتباهات الخاطئة"], rows, groupStart: [1, 5], compactHeaders: true, rowPx: 56 })}</div>
 <p class="v3-note" style="margin-top:8px;font-size:21px">المقارنة على مستوى إجابات كل مستوى على حدة. «منفذ بحري» هنا المنافذ البحرية دون ${esc(m.displayName)}.</p>`,
       ),
     );
@@ -501,7 +506,7 @@ ${tintedPanel({
       );
     }
   };
-  employeeTables(b("emp"), staff, "s3", A3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم`);
+  employeeTables(b("emp"), staff, "s3", A3, workload ? `ملحق: منسوبو ${m.displayName}` : `منسوبي ${m.displayName}`, `في المستويين، تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم (10% من متوسط الحالات المدروسة للموظف)`);
 
   // Appendix — employees below the threshold, listed so nobody silently disappears
   if (excluded.length) {
@@ -521,13 +526,14 @@ ${tintedPanel({
     b("div1w").push(sectionDivider({ eyebrow: footText, ghost: "01", kicker: "القسم الأول", title: W1, description: "", footItems: [], meta: meta("w", W1) }));
     b("div2w").push(sectionDivider({ eyebrow: footText, ghost: "02", kicker: "القسم الثاني", title: "نتائج الدراسة", description: "", footItems: [], meta: meta("s2", S2) }));
     b("counts").push(slideShell(meta("s2", S2), "", countsTimelineInner(m, workload)));
+    b("popMonthly").push(slideShell(meta("w", W1), "", populationTimelineInner(m, workload, `القسم الأول - ${W1}`)));
     b("div3w").push(sectionDivider({ eyebrow: footText, ghost: "03", kicker: "القسم الثالث", title: "التوصيات", description: "", footItems: [], meta: meta("obs", OBS) }));
   }
   const wl = (key: string) => (B.wl ?? []).filter((x) => x.includes(`data-section="${key}"`));
   // With workload data: three main sections (العبء التشغيلي، نتائج الدراسة، التوصيات), then the appendices.
   // The year-on-year tier comparison sits in ملحق ب; «أداء المنفذ مقارنة بمستويات العبء» (w4) is left out.
   const order: string[][] = workload
-    ? [b("cover"), b("div1w"), wl("w1"), wl("w1b"), wl("w2"), b("div2w"), b("counts"), b("tiers"), b("staffVs"), wl("w3"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
+    ? [b("cover"), b("div1w"), b("popMonthly"), wl("w1"), wl("w2"), b("div2w"), b("counts"), b("staffVs"), wl("w3"), b("tiers"), b("div3w"), b("obs"), b("appDiv"), b("gloss"), b("wlApp"),
        b("div1"), b("pop"), b("div2"), wl("w5"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("emp"), b("div4"), b("empLow"), b("closing")]
     : [b("cover"), b("gloss"), b("div1"), b("pop"), b("div2"), b("results"), b("ranking"), b("timeline"), b("levels"), b("div3"), b("tiers"), b("staffVs"), b("emp"), b("div4"), b("empLow"), b("closing")];
   const html = order.flat().join("\n");
@@ -672,53 +678,112 @@ ${svg}`;
 const TIER_TONE: Record<AccuracyTier["key"], ChartTone> = { low: "red", mid: "gold", high: "green" };
 
 /**
- * Monthly counts for the selected port, opening «نتائج الدراسة»: all shipments (images received) in the
- * top band, and the missed and false suspicions among the studied images in the bottom band. The two
- * bands share the RTL month axis of the نسبة التوائم timeline, each on its own zero-based scale,
- * because shipments run in the tens of thousands and the errors in the tens.
+ * Monthly counts for the selected port, opening «نتائج الدراسة»: the studied images in the top band,
+ * and the missed and false suspicions among them in the bottom band (owner, 2026-11-10: the received
+ * images were replaced by the studied ones, the base of the error counts). The two bands share the RTL
+ * month axis of the نسبة التوائم timeline, each on its own zero-based scale.
  */
+type BandSeries = { label: string; color: string; band: "top" | "bottom"; values: (number | null)[]; chipDy: number; total: boolean; /** Values are percentages; the legend shows this summary instead of totals. */ percent?: string };
+type BandTimeline = { eyebrow: string; title: string; aria: string; topTitle: string; botTitle: string; series: BandSeries[]; notes: string[] };
+
+/** Monthly studied images (top band) with the missed and false suspicions among them (bottom band). */
 function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string {
-  const months = (w.monthlyCounts ?? []).filter((x) => x.images !== null);
-  const head = contentHead({ eyebrow: S2, title: `الحالات الواردة والاشتباهات الفائتة والخاطئة شهرياً`, note: m.displayName });
+  const months = w.monthlyCounts ?? [];
+  const share = (n: number, of: number) => (of ? (100 * n) / of : null);
+  const totalOf = (k: "missed" | "falseSuspicion" | "studied") => months.reduce((a0, x0) => a0 + x0[k], 0);
+  const notes: string[] = [];
+  const firstMissed = months.findIndex((x0) => x0.missed > 0);
+  if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${Number(months[firstMissed].monthKey.slice(5))}/${months[firstMissed].monthKey.slice(0, 4)}.`);
+  notes.push("الخط المتقطع لكل مؤشر: متوسطه الشهري.");
+  notes.push("الحالات المدروسة: الصور التي درسها أخصائي ضمان جودة الأشعة في كل شهر. النسبة: عدد الاشتباهات الفائتة أو الخاطئة في الشهر ÷ الحالات المدروسة في الشهر نفسه.");
+  return bandTimelineInner(m, months, {
+    eyebrow: S2,
+    title: "الحالات المدروسة والاشتباهات الفائتة والخاطئة شهرياً",
+    aria: "الخط الزمني للحالات المدروسة والاشتباهات",
+    topTitle: "الحالات المدروسة (العينة)",
+    botTitle: "نسبة الاشتباهات الفائتة والخاطئة من الحالات المدروسة",
+    series: [
+      { label: "الحالات المدروسة", color: LINE_COLOR.all, band: "top", values: months.map((x0) => x0.studied), chipDy: -24, total: true },
+      { label: "نسبة الاشتباهات الفائتة", color: "var(--v3-red)", band: "bottom", values: months.map((x0) => share(x0.missed, x0.studied)), chipDy: -24, total: false, percent: `للفترة ${pct(totalOf("missed") / Math.max(1, totalOf("studied")))}` },
+      { label: "نسبة الاشتباهات الخاطئة", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => share(x0.falseSuspicion, x0.studied)), chipDy: 26, total: false, percent: `للفترة ${pct(totalOf("falseSuspicion") / Math.max(1, totalOf("studied")))}` },
+    ],
+    notes,
+  });
+}
+
+/** Monthly population (images received at the port) with the distinct employees who examined them. */
+function populationTimelineInner(m: PortReportModel, w: WorkloadSlideInput, eyebrow: string): string {
+  const months = (w.monthlyCounts ?? []).filter((x0) => x0.images !== null || x0.employees !== null);
+  // A month under half the median month is an incomplete population sheet, not a quiet month.
+  const sorted = months.map((x0) => x0.images ?? 0).sort((a0, b0) => a0 - b0);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  const thin = months.filter((x0) => (x0.images ?? 0) < median / 2).map((x0) => `${Number(x0.monthKey.slice(5))}/${x0.monthKey.slice(0, 4)} (${fmtNum(x0.images ?? 0)} صورة)`);
+  const thinMonths = thin.length ? [`بيانات المجتمع في ملف المصدر غير مكتملة لشهر ${thin.join("، ")}.`] : [];
+  return bandTimelineInner(m, months, {
+    eyebrow,
+    title: "عدد صور الأشعة ومتوسط الموظفين في المنفذ شهرياً",
+    aria: "الخط الزمني لمجتمع الحالات الواردة وعدد الموظفين",
+    topTitle: "عدد صور الأشعة للمنفذ",
+    botTitle: "عدد الموظفين في المنفذ",
+    series: [
+      { label: "عدد صور الأشعة للمنفذ", color: LINE_COLOR.all, band: "top", values: months.map((x0) => x0.images), chipDy: -24, total: true },
+      { label: "متوسط الموظفين في المنفذ", color: LINE_COLOR.selected, band: "bottom", values: months.map((x0) => x0.employees), chipDy: -24, total: false },
+    ],
+    notes: [...thinMonths, "الخط المتقطع لكل مؤشر: متوسطه الشهري.", "عدد الموظفين: كل موظف فحص صورة واحدة على الأقل في المنفذ خلال الشهر، ويُحسب مرة واحدة. المتوسط: مجموع أعداد الأشهر ÷ عدد الأشهر."],
+  });
+}
+
+function bandTimelineInner(m: PortReportModel, months: ReadonlyArray<{ monthKey: string }>, o: BandTimeline): string {
+  const head = contentHead({ eyebrow: o.eyebrow, title: o.title, note: m.displayName });
   if (months.length < 2) return `${head}<p class="v3-note">لا توجد أشهر كافية لرسم الخط الزمني.</p>`;
   const W = 1760, padL = 40, padR = 170;
   const topT = 44, topH = 210, gap = 80, botH = 210, axisH = 120;
   const H = topT + topH + gap + botH + axisH;
   const botT = topT + topH + gap;
   const x = (i: number) => W - padR - ((W - padL - padR) * i) / (months.length - 1);
-  const nice = (v: number) => { const p = 10 ** Math.floor(Math.log10(Math.max(1, v))); return Math.ceil(v / p) * p; };
-  const imgMax = nice(Math.max(1, ...months.map((x0) => x0.images ?? 0)) * 1.15);
-  const errMax = nice(Math.max(1, ...months.flatMap((x0) => [x0.missed, x0.falseSuspicion])) * 1.25);
+  // Axis top: the next 1-1.2-1.6-2-2.4-3-4-5-6-8 step, so four grid lines land on round numbers without flattening the line.
+  const nice = (v: number) => { const p = 10 ** Math.floor(Math.log10(Math.max(1, v))); return ([1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10].find((k) => k * p >= v) ?? 10) * p; };
+  const botPct = o.series.some((s0) => s0.band === "bottom" && s0.percent !== undefined);
+  const bandVals = (band: BandSeries["band"]) => o.series.filter((s0) => s0.band === band).flatMap((s0) => s0.values).filter((v): v is number => v !== null);
+  const imgMax = nice(Math.max(1, ...bandVals("top")) * 1.15);
+  // Percent axes step by whole 5s (20, 40, 60...) so the four grid lines read 5%, 10%, 15%.
+  const errMax = botPct ? Math.max(20, Math.ceil((Math.max(1, ...bandVals("bottom")) * 1.25) / 20) * 20) : nice(Math.max(1, ...bandVals("bottom")) * 1.25);
   const yT = (v: number) => topT + topH * (1 - v / imgMax);
   const yB = (v: number) => botT + botH * (1 - v / errMax);
   const grid: string[] = [];
   for (let g = 0; g <= 4; g++) {
     const vt = (imgMax * g) / 4, vb = (errMax * g) / 4;
     grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yT(vt).toFixed(1)}" y2="${yT(vt).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yT(vt) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vt))}</text>`);
-    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${fmtNum(Math.round(vb))}</text>`);
+    grid.push(`<line x1="${padL}" x2="${W - padR}" y1="${yB(vb).toFixed(1)}" y2="${yB(vb).toFixed(1)}" stroke="var(--v3-hair)" stroke-width="1"/><text x="${W - padR + 78}" y="${(yB(vb) + 7).toFixed(1)}" text-anchor="start" font-size="19" fill="var(--v3-muted)">${botPct ? `${Math.round(vb)}%` : fmtNum(Math.round(vb))}</text>`);
   }
-  const series = [
-    { label: "الحالات الواردة", color: LINE_COLOR.all, y: yT, values: months.map((x0) => x0.images ?? 0), chipDy: -24 },
-    { label: "الاشتباهات الفائتة", color: "var(--v3-red)", y: yB, values: months.map((x0) => x0.missed), chipDy: -24 },
-    { label: "الاشتباهات الخاطئة", color: LINE_COLOR.selected, y: yB, values: months.map((x0) => x0.falseSuspicion), chipDy: 26 },
-  ];
+  const series = o.series.map((s0) => ({ ...s0, y: s0.band === "top" ? yT : yB }));
+  const bottom = series.filter((s0) => s0.band === "bottom");
   const chip = (cx: number, cy: number, text: string, color: string, wpx: number) =>
     `<rect x="${(cx - wpx / 2).toFixed(1)}" y="${(cy - 13).toFixed(1)}" width="${wpx}" height="26" rx="5" fill="${color}"/><text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="16" font-weight="700" fill="var(--v3-bg)">${text}</text>`;
   const lines = series
-    .map((ser, si) => {
-      const d = ser.values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${ser.y(v).toFixed(1)}`).join(" ");
-      const dots = ser.values.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${ser.y(v).toFixed(1)}" r="5" fill="${ser.color}"/>`).join("");
+    .map((ser) => {
+      const d = ser.values.map((v, i) => (v === null ? "" : `${i && ser.values[i - 1] !== null ? "L" : "M"}${x(i).toFixed(1)},${ser.y(v).toFixed(1)}`)).join(" ");
+      const dots = ser.values.map((v, i) => (v === null ? "" : `<circle cx="${x(i).toFixed(1)}" cy="${ser.y(v).toFixed(1)}" r="5" fill="${ser.color}"/>`)).join("");
       const chips = ser.values
         .map((v, i) => {
+          if (v === null) return "";
           // The higher of the two error counts gets its chip above its point, the lower one below,
           // so neither chip covers the other line.
           let dy = ser.chipDy;
-          if (si > 0) { const other = series[si === 1 ? 2 : 1].values[i]; dy = v >= other ? -24 : 26; if (v === other && si === 2) dy = 26; }
-          const t = fmtNum(v);
+          if (ser.band === "bottom" && bottom.length === 2) {
+            const bi = bottom.indexOf(ser);
+            const other = bottom[1 - bi].values[i] ?? 0;
+            dy = v >= other ? -24 : 26;
+            if (v === other && bi === 1) dy = 26;
+          }
+          const t = ser.percent !== undefined ? `${v.toFixed(1)}%` : fmtNum(v);
           return chip(x(i), ser.y(v) + dy, t, ser.color, Math.max(40, 12 + t.length * 10));
         })
         .join("");
-      return `<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>${dots}${chips}`;
+      const kv = ser.values.filter((v): v is number => v !== null);
+      const avgY = kv.length ? ser.y(kv.reduce((a0, b0) => a0 + b0, 0) / kv.length).toFixed(1) : null;
+      const avgLine = avgY === null ? "" : `<line x1="${padL}" x2="${W - padR}" y1="${avgY}" y2="${avgY}" stroke="${ser.color}" stroke-width="2" stroke-dasharray="8 6" opacity="0.8"/>`;
+      return `${avgLine}<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>${dots}${chips}`;
     })
     .join("");
   const bandTitle = (y0: number, text: string) => `<text x="${W - padR - 8}" y="${y0}" text-anchor="start" font-size="22" font-weight="700" fill="var(--v3-navy)" direction="rtl">${esc(text)}</text>`;
@@ -739,21 +804,20 @@ function countsTimelineInner(m: PortReportModel, w: WorkloadSlideInput): string 
       return `${sep}<text x="${mid.toFixed(1)}" y="${H - 18}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--v3-navy)">${yr.year}</text>`;
     })
     .join("");
-  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="الخط الزمني للحالات الواردة (إرساليات) والاشتباهات" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, "الحالات الواردة (جميع الصور)")}${bandTitle(botT - 14, "الاشتباهات الفائتة والخاطئة (من الصور المدروسة)")}${lines}${monthLabels}</svg>`;
-  const total = (vals: number[]) => vals.reduce((a0, b0) => a0 + b0, 0);
+  const svg = `<svg data-pptx-image viewBox="0 0 ${W} ${H}" width="100%" height="${H}" dir="ltr" direction="ltr" role="img" aria-label="${esc(o.aria)}" style="display:block;background:var(--v3-panel)">${grid.join("")}${yearLabels}${bandTitle(topT - 14, o.topTitle)}${bandTitle(botT - 14, o.botTitle)}${lines}${monthLabels}</svg>`;
+  const known = (vals: (number | null)[]) => vals.filter((v): v is number => v !== null);
+  const total = (vals: (number | null)[]) => known(vals).reduce((a0, b0) => a0 + b0, 0);
+  const fmtV = (ser: (typeof series)[number], v: number) => (ser.percent !== undefined ? `${v.toFixed(1)}%` : fmtNum(v));
+  const ext = (ser: (typeof series)[number]) => {
+    let lo = -1, hi = -1;
+    ser.values.forEach((v, i) => { if (v === null) return; if (lo < 0 || v < (ser.values[lo] as number)) lo = i; if (hi < 0 || v > (ser.values[hi] as number)) hi = i; });
+    const mk = (i: number) => `${fmtV(ser, ser.values[i] as number)} (${Number(months[i].monthKey.slice(5))}/${months[i].monthKey.slice(0, 4)})`;
+    return lo < 0 ? "" : ` · الأدنى ${mk(lo)} · الأعلى ${mk(hi)}`;
+  };
   const legend = series
-    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">الإجمالي ${fmtNum(total(ser.values))} · المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / months.length))}</span></div>`)
+    .map((ser) => `<div style="display:flex;align-items:center;gap:12px;font-size:22px;white-space:nowrap"><span style="display:inline-block;width:34px;height:0;border-top:4px solid ${ser.color}"></span><b style="color:var(--v3-navy)">${esc(ser.label)}</b><span style="color:var(--v3-muted)">${ser.percent !== undefined ? ser.percent : `${ser.total ? `الإجمالي ${fmtNum(total(ser.values))} · ` : ""}المتوسط الشهري ${fmtNum(Math.round(total(ser.values) / Math.max(1, known(ser.values).length)))}`}${ext(ser)}</span></div>`)
     .join("");
-  // Source caveats, detected from the figures: months before any missed suspicion was recorded, and
-  // months whose received images are under half the median month (an incomplete population sheet).
-  const mLabel = (k: string) => `${Number(k.slice(5))}/${k.slice(0, 4)}`;
-  const notes: string[] = [];
-  const firstMissed = months.findIndex((x0) => x0.missed > 0);
-  if (firstMissed > 0) notes.push(`لا يوجد اشتباه فائت مسجل في نتائج الدراسة قبل ${mLabel(months[firstMissed].monthKey)}.`);
-  const sortedImg = months.map((x0) => x0.images ?? 0).sort((a0, b0) => a0 - b0);
-  const median = sortedImg[Math.floor(sortedImg.length / 2)];
-  const thin = months.filter((x0) => (x0.images ?? 0) < median / 2).map((x0) => mLabel(x0.monthKey));
-  if (thin.length) notes.push(`الحالات الواردة في ${thin.join("، ")} أقل من نصف الشهر المعتاد في ملف المجتمع، ويُرجّح أن بيانات تلك الأشهر غير مكتملة في المصدر.`);
+  const notes = o.notes;
   return `${head}
 <div style="display:flex;flex-wrap:wrap;gap:10px 48px;margin-bottom:10px">${legend}</div>
 ${svg}${notes.length ? `<p class="v3-note" style="margin:6px 0 0;font-size:18px">${notes.map(esc).join(" ")}</p>` : ""}`;
@@ -762,6 +826,7 @@ ${svg}${notes.length ? `<p class="v3-note" style="margin:6px 0 0;font-size:18px"
 function tiersInner(m: PortReportModel, eyebrow = S3): string {
   const d = m.distribution;
   const head = contentHead({ eyebrow, title: `معدل التوافق لمنسوبي ${m.displayName}`, note: `المتوسط ${pct(d.mean)} · الوسيط ${pct(d.median)}` });
+  const MIN_TIER_SAMPLE = employeeMinStudied(m.employees);
   if (d.tiers.length === 0) return `${head}<p class="v3-note">لا يوجد موظفون بعدد حالات مدروسة كافٍ (${MIN_TIER_SAMPLE} فأكثر).</p>`;
   const sections = d.tiers
     .map((t, i) => {
@@ -777,7 +842,7 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
         barMaxWidth: 110,
         gap: 14,
         pad: 10,
-        plotHeight: 250,
+        plotHeight: 185,
         valueFormat: (v) => fmtNum(Math.round(v)),
       });
       const table = kvTable([
@@ -785,6 +850,8 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
         { label: "تنتهي عند", value: pct(t.to) },
         { label: "عدد الموظفين", value: fmtNum(t.count) },
         { label: "متوسط دقة الموظفين", value: pct(t.meanAccuracy), cls: `v-${tone}` },
+        { label: "معدل الاشتباه الفائت", value: pct(t.studied ? t.missed / t.studied : null), cls: "v-red" },
+        { label: "معدل الاشتباه الخاطئ", value: pct(t.studied ? t.falseSuspicion / t.studied : null), cls: "v-gold" },
         { label: "متوسط الحالات لكل موظف", value: t.meanStudied === null ? "—" : fmtNum(Math.round(t.meanStudied)), cls: "v-muted" },
       ]);
       return `<div style="display:flex;flex-direction:column;min-width:0;${i > 0 ? RULE : ""}">
@@ -796,7 +863,7 @@ function tiersInner(m: PortReportModel, eyebrow = S3): string {
     .join("");
   return `${head}
 <div class="v3-two-col" style="grid-template-columns:repeat(3,1fr);gap:32px">${sections}</div>
-<p class="v3-note" style="margin-top:8px;font-size:21px">تم احتساب الفئات بناءً على الفرق بين أقل معدل دقة وأعلى معدل دقة مقسومًا على ثلاثة، وكل فئة مقسمة إلى ثلاثة أعمدة. الموظفون المدروسة حالاتهم ${fmtNum(m.employees.length)}: صُنِّف منهم ${fmtNum(d.tiered)} تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم، واستُبعد ${fmtNum(d.untiered)} (في الملحقات).</p>`;
+<p class="v3-note" style="margin-top:8px;font-size:21px">تم احتساب الفئات بناءً على الفرق بين أقل معدل دقة وأعلى معدل دقة مقسومًا على ثلاثة، وكل فئة مقسمة إلى ثلاثة أعمدة. الموظفون المدروسة حالاتهم ${fmtNum(m.employees.length)}: صُنِّف منهم ${fmtNum(d.tiered)} تمت دراسة ${MIN_TIER_SAMPLE} حالة فأكثر لكل منهم (10% من متوسط الحالات المدروسة للموظف)، واستُبعد ${fmtNum(d.untiered)} (في الملحقات).</p>`;
 }
 
 /** Complete self-contained HTML document for one port. */
@@ -806,14 +873,17 @@ export function buildPortReportHtml(m: PortReportModel, workload?: WorkloadSlide
   const count = (slides.match(/<section class="slide v3/g) ?? []).length;
   const html = buildDeckV3Html(slides.replaceAll(`/ ${TOTAL_TOKEN}<`, `/ ${count}<`), m.periodLabel, { title: name, navBrand: name, toolbarBrand: name }, "", null); // null = in-viewer text editor on, no saved template
   // Figures centred under their headers; the first (label) column stays right-aligned.
-  const centre = ".slide.v3 .v3-table th:not(:first-child),.slide.v3 .v3-table td:not(:first-child){text-align:center;}.slide.v3 .v3-bar span{position:absolute;bottom:100%;margin-bottom:6px;color:var(--v3-navy);white-space:nowrap;z-index:2;}.slide.v3 .v3-bar{padding-top:0;}.slide.v3 .pr-pop td{padding-top:2px;padding-bottom:2px;font-size:22px;height:auto;}.slide.v3 .pr-dense td{font-size:17px;padding-top:0;padding-bottom:0;line-height:1.1;}.slide.v3 .pr-lv td{font-size:21px;white-space:nowrap;}.slide.v3 .pr-dense td:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.slide.v3 .pr-dense th{font-size:16px;}.slide.v3 .pr-dense td:first-child{font-size:16px;}.slide.v3 .pr-wrap td{white-space:normal;overflow:visible;line-height:1.05;}.slide.v3 .pr-tier td{font-size:18px;height:34px;}.slide.v3 .pr-tier td:first-child{font-size:16px;}.slide.v3 .v3-table th{white-space:normal;line-height:1.25;vertical-align:bottom;}" +
+  const centre = ".slide.v3 .v3-table th:not(:first-child),.slide.v3 .v3-table td:not(:first-child){text-align:center;}.slide.v3 .v3-bar span{position:absolute;bottom:100%;margin-bottom:6px;color:var(--v3-navy);white-space:nowrap;z-index:2;}.slide.v3 .v3-bar{padding-top:0;}.slide.v3 .pr-pop td{padding-top:2px;padding-bottom:2px;font-size:22px;height:auto;}.slide.v3 .pr-dense td{font-size:17px;padding-top:0;padding-bottom:0;line-height:1.1;}.slide.v3 .pr-lv td{font-size:21px;white-space:nowrap;}.slide.v3 .pr-dense td:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.slide.v3 .pr-dense th{font-size:16px;}.slide.v3 .pr-dense td:first-child{font-size:16px;}.slide.v3 .pr-wrap td{white-space:normal;overflow:visible;line-height:1.05;}.slide.v3 .pr-tier td{font-size:17px;height:34px;white-space:nowrap;}.slide.v3 .pr-tier td:first-child{font-size:16px;}.slide.v3 .pr-tier th{padding-left:3px;padding-right:3px;font-size:14px;}.slide.v3 .pr-tier td:nth-child(2){font-size:14px;overflow:hidden;text-overflow:ellipsis;}.slide.v3 .v3-table th{white-space:normal;line-height:1.25;vertical-align:bottom;}" +
     ".slide.v3 .pr-yb .v3-bar span{font-size:17px;letter-spacing:0;}.slide.v3 .pr-yb1 .v3-bar span{font-size:15px;letter-spacing:-.3px;}" +
     // No clipped text: the appendix rows grow with a wrapped port name.
     ".slide.v3 .pr-apx td{height:auto;min-height:28px;overflow:visible;font-size:18px;}.slide.v3 .pr-apx td:first-child{font-size:17px;overflow:visible;}" +
     ".slide.v3 .pr-cmp td{font-size:21px;white-space:nowrap;}" +
     // Observations: one size for the main observation, the evidence and the recommendations, on every page.
     ".slide.v3 .pr-obs-even .v3-obs-text,.slide.v3 .pr-obs-even .v3-obs-title{font-size:24px;line-height:1.55;}" +
-    ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}";
+    ".slide.v3 .pr-obs-even .v3-obs-main .v3-obs-body{align-items:flex-start;}" +
+    // Side-by-side panels: one-line titles, so every panel's table starts at the same height.
+    ".slide.v3 .pr-eq .v3-panel-title,.slide.v3 .v3-two-col .v3-panel-title{white-space:nowrap;}" +
+    ".slide.v3 .pr-eq .v3-panel-head{flex-wrap:nowrap;}";
   // Long dashes out, including the viewer script's escaped ones ("\u2014" in its page counter).
   return html.replace("</style>", `${centre}</style>`).replace(/[\u2013\u2014]/g, "-").replace(/\\u201[34]/g, "-");
 }

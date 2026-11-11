@@ -8,16 +8,16 @@ import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { buildPortNameMap } from "../portNameCanonical";
 import { portReportInputFromSheets } from "./portReportSource";
-import type { PortReportInput, PortReportModel } from "./portReportModel";
-import { buildPortReportModel, listReportPorts, STATUS_FALSE_SUSPICION, STATUS_MISSED } from "./portReportModel";
+import type { OutcomeStats, PortReportInput, PortReportModel } from "./portReportModel";
+import { buildEmployeeRows, buildPortReportModel, employeeMinStudied, listReportPorts, NON_EMPLOYEE_CODES, STATUS_FALSE_SUSPICION, STATUS_MISSED } from "./portReportModel";
 import { buildPortReportHtml } from "./portReportHtml";
 import { buildPortObservations } from "./portObservations";
 import type { PortObservation } from "./portObservations";
-import { buildPortWorkloads, buildWorkloadTiers, LOAD_YEAR, outcomesByYear, outcomesFor, unratedPorts, workloadMeasure } from "./portWorkloadModel";
+import { buildPortWorkloads, buildVolumeTiers, LOAD_YEAR, outcomesByYear, outcomesFor, unratedPorts, workloadMeasure } from "./portWorkloadModel";
 import type { LevelOutcomes, WorkloadTierKey } from "./portWorkloadModel";
 import { groupTotals, workforceFigures } from "./portWorkloadSlides";
 import type { WorkloadSlideInput } from "./portWorkloadSlides";
-import type { WorkloadMonth } from "./workloadAggregate";
+import type { StudyCodes, WorkloadMonth } from "./workloadAggregate";
 
 type Rows = unknown[][];
 
@@ -39,6 +39,8 @@ export type PortReportOptions = {
   lastMonth?: string;
   /** Whole years left out of the report (population, workload and study rows). */
   excludeYears?: readonly string[];
+  /** Leave transit declarations («البيان» = ترانزيت) out: population, workload and study rows. */
+  excludeTransit?: boolean;
 };
 
 export type PortReportData = {
@@ -46,7 +48,26 @@ export type PortReportData = {
   studyRows: Rows;
   /** The year / quarter population sheets, aggregated (workloadAggregate.ts). */
   workloadMonths: readonly WorkloadMonth[];
+  /** The same months without transit images (workloadAggregate's `monthsNoTransit`). */
+  workloadMonthsNoTransit?: readonly WorkloadMonth[];
+  /** Image ids of transit declarations (workloadAggregate's `transitIds`). */
+  transitIds?: readonly string[];
+  /** Population employees for studied image ids (workloadAggregate's `studyCodes`), used to fill study rows without codes. */
+  studyCodes?: Readonly<Record<string, StudyCodes>>;
 };
+
+/** Study rows whose level has no employee code take it from the population row of the same image id. Returns how many levels were filled. */
+export function fillStudyCodes(studies: PortReportInput["studies"], codes: Readonly<Record<string, StudyCodes>> | undefined): number {
+  if (!codes) return 0;
+  let filled = 0;
+  for (const r of studies) {
+    const e = r.id ? codes[r.id] : undefined;
+    if (!e) continue;
+    if (r.l1 && !r.l1.code && e.c1) { r.l1.code = e.c1; if (!r.l1.name && e.n1) r.l1.name = e.n1; filled++; }
+    if (r.l2 && !r.l2.code && e.c2) { r.l2.code = e.c2; if (!r.l2.name && e.n2) r.l2.name = e.n2; filled++; }
+  }
+  return filled;
+}
 
 /** Canonical port name lookup over both sources, so «ميناء جده الاسلامي» and «ميناء جدة الإسلامي» are one port. */
 function portNameLookup(data: PortReportData, input: PortReportInput): (p: string) => string {
@@ -77,43 +98,87 @@ export type PortReportBuild = {
   workload: WorkloadSlideInput;
   html: string;
   observations: PortObservation[];
+  /** The processed study rows the report counted (for the processed-data workbook). */
+  studies: PortReportInput["studies"];
+  /** Raw population port name → canonical name. */
+  portNames: Record<string, string>;
+  /** Whether a population month is inside the report (years, last month). */
+  keepMonth: (ym: string) => boolean;
 };
 
-/** Ports with at least this many studied images are placed in an accuracy group. */
-const MIN_GROUP_STUDIED = 30;
-
-/** Ports (selected one excluded) ranked by نسبة التوائم and cut into thirds of equal size. */
+/**
+ * Employees of the other ports (selected port excluded) in three accuracy groups, by the same rule as
+ * the selected port's own staff (buildAccuracyDistribution): only employees reaching employeeMinStudied,
+ * equal-width ranges = (highest − lowest نسبة التوائم) ÷ 3. Each group's level-1 / level-2 outcomes are
+ * the answers its employees gave at that level.
+ */
 function accuracyGroups(studies: PortReportInput["studies"], selected: string): NonNullable<WorkloadSlideInput["accuracyGroups"]> {
-  const acc = new Map<string, [number, number]>();
-  for (const r of studies) {
-    if (r.port === selected) continue;
-    const v = acc.get(r.port) ?? [0, 0];
-    v[0] += 1;
-    if (r.imageMatch) v[1] += 1;
-    acc.set(r.port, v);
+  // The selected port's staff stand alone in their own panel; the three groups are built from the
+  // answers given at every other port (owner, 2026-11-10): whoever examined there is graded there.
+  const other = studies.filter((r) => r.port !== selected);
+  const rated = buildEmployeeRows(other);
+  const minStudied = employeeMinStudied(rated);
+  const eligible = rated.filter((e) => e.studied >= minStudied && e.accuracy !== null);
+  const values = eligible.map((e) => e.accuracy as number);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const width = (max - min) / 3;
+  const tierOf = new Map(eligible.map((e) => [e.code, width === 0 ? 0 : Math.min(2, Math.floor(((e.accuracy as number) - min) / width))]));
+  const empty = (): OutcomeStats => ({ studied: 0, trueSuspicion: 0, falseSuspicion: 0, missed: 0, trueClear: 0, matched: 0, accuracy: null });
+  const groups = [0, 1, 2].map(() => ({ image: empty(), l1: empty(), l2: empty(), n: 0, acc: 0 }));
+  for (const e of eligible) { const g = groups[tierOf.get(e.code) as number]; g.n += 1; g.acc += e.accuracy as number; }
+  const add = (o: OutcomeStats, status: string, match: boolean) => {
+    o.studied++;
+    if (match) o.matched++;
+    if (status === "اشتباه صحيح") o.trueSuspicion++;
+    else if (status === STATUS_FALSE_SUSPICION) o.falseSuspicion++;
+    else if (status === STATUS_MISSED) o.missed++;
+    else if (status === "سليمة صحيحة") o.trueClear++;
+  };
+  for (const r of other) {
+    for (const [lvl, key] of [[r.l1, "l1"], [r.l2, "l2"]] as const) {
+      const t = lvl ? tierOf.get(lvl.code) : undefined;
+      if (!lvl || t === undefined) continue;
+      add(groups[t][key], lvl.status, lvl.match);
+      add(groups[t].image, lvl.status, lvl.match); // both levels' answers together
+    }
   }
-  const ranked = [...acc].filter(([, [n]]) => n >= MIN_GROUP_STUDIED).map(([p, [n, ok]]) => ({ p, a: ok / n })).sort((x, y) => x.a - y.a || x.p.localeCompare(y.p));
-  const n = ranked.length;
-  const cuts = [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+  for (const g of groups) for (const o of [g.image, g.l1, g.l2]) o.accuracy = o.studied ? o.matched / o.studied : null;
   const labels = ["منخفضة", "متوسطة", "عالية"];
-  return (["low", "mid", "high"] as const).map((key, i) => {
-    const g = ranked.slice(cuts[i], cuts[i + 1]);
-    return { key, label: labels[i], ports: g.map((x) => x.p), from: g[0]?.a ?? null, to: g[g.length - 1]?.a ?? null, outcomes: outcomesFor(studies, new Set(g.map((x) => x.p))) };
-  });
+  return (["low", "mid", "high"] as const).map((key, i) => ({
+    key,
+    label: labels[i],
+    employees: groups[i].n,
+    meanAccuracy: groups[i].n ? groups[i].acc / groups[i].n : null,
+    from: values.length ? min + width * i : null,
+    to: values.length ? (i === 2 ? max : min + width * (i + 1)) : null,
+    outcomes: { image: groups[i].image, l1: groups[i].l1, l2: groups[i].l2 },
+  }));
 }
 
 export function buildPortReport(data: PortReportData, opts: PortReportOptions): PortReportBuild {
   const input = studyInput(data, opts.period);
+  fillStudyCodes(input.studies, data.studyCodes);
   const canon = portNameLookup(data, input);
   for (const r of input.studies) r.port = canon(r.port);
   input.studies = input.studies.filter((r) => (r.year === null || String(r.year) >= FIRST_REPORT_YEAR) && (!r.monthKey || inReportYears(r.monthKey)));
   const excludeYears = new Set(opts.excludeYears ?? []);
-  if (excludeYears.size) input.studies = input.studies.filter((r) => r.year === null || !excludeYears.has(String(r.year)));
-  const months = data.workloadMonths
+  // A year left out goes by the capture year and, when it is missing, by the entry month.
+  if (excludeYears.size) input.studies = input.studies.filter((r) => !excludeYears.has(r.year === null ? r.monthKey.slice(0, 4) : String(r.year)));
+  if (opts.excludeTransit && data.transitIds?.length) {
+    const transit = new Set(data.transitIds);
+    input.studies = input.studies.filter((r) => !r.id || !transit.has(r.id));
+  }
+  const source = opts.excludeTransit && data.workloadMonthsNoTransit ? data.workloadMonthsNoTransit : data.workloadMonths;
+  const months = source
     .filter((x) => inReportYears(x.month) && (!opts.lastMonth || x.month <= opts.lastMonth) && !excludeYears.has(x.month.slice(0, 4)))
     .map((x) => ({ ...x, port: canon(x.port) }));
-  const portWorkloads = buildPortWorkloads(months);
-  const tiers = buildWorkloadTiers(portWorkloads);
+  // Staff and workload are measured on LOAD_YEAR, or on the report's latest year when LOAD_YEAR is left out.
+  const monthYears = [...new Set(months.map((x) => x.month.slice(0, 4)))].sort();
+  const loadYear = monthYears.includes(LOAD_YEAR) ? LOAD_YEAR : monthYears.at(-1) ?? LOAD_YEAR;
+  const portWorkloads = buildPortWorkloads(months, loadYear);
+  // Tiers by the port's own images a month (ports too small to rate are left out as before).
+  const tiers = buildVolumeTiers(portWorkloads.filter((p) => workloadMeasure(p) !== null), (p) => p.imagesPerMonth);
   const port = canon(opts.port);
   const outcomes = { selected: outcomesFor(input.studies, new Set([port])) } as Record<"selected" | WorkloadTierKey, LevelOutcomes>;
   for (const t of tiers) outcomes[t.key] = outcomesFor(input.studies, new Set(t.ports.map((p) => p.port).filter((p) => p !== port)));
@@ -123,22 +188,32 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
     tiers,
     outcomes,
     yearly: outcomesByYear(input.studies, port, tiers),
-    loadYear: LOAD_YEAR,
+    loadYear,
     periodLabel: opts.period,
     unrated: unratedPorts(portWorkloads),
   } as WorkloadSlideInput;
-  // Monthly counts for the selected port: all images received, and the studied images per error.
-  const mc = new Map<string, { monthKey: string; images: number | null; missed: number; falseSuspicion: number }>();
-  const mcAt = (k: string) => { let v = mc.get(k); if (!v) { v = { monthKey: k, images: null, missed: 0, falseSuspicion: 0 }; mc.set(k, v); } return v; };
-  for (const x of months) if (x.port === port) { const v = mcAt(x.month); v.images = (v.images ?? 0) + x.images; }
+  // Monthly counts for the selected port: images received, images studied, and the studied images per error.
+  const mc = new Map<string, { monthKey: string; images: number | null; employees: number | null; studied: number; missed: number; falseSuspicion: number }>();
+  const mcAt = (k: string) => { let v = mc.get(k); if (!v) { v = { monthKey: k, images: null, employees: null, studied: 0, missed: 0, falseSuspicion: 0 }; mc.set(k, v); } return v; };
+  // Employees per month: distinct level-1 / level-2 codes that examined at least one image at the port that month.
+  const staff = new Map<string, Set<string>>();
+  for (const x of months) {
+    if (x.port !== port) continue;
+    const v = mcAt(x.month);
+    v.images = (v.images ?? 0) + x.images;
+    const set = staff.get(x.month) ?? new Set<string>();
+    for (const rec of [x.l1, x.l2]) for (const c of Object.keys(rec)) if (c && !NON_EMPLOYEE_CODES.has(c.toUpperCase())) set.add(c);
+    staff.set(x.month, set);
+  }
+  for (const [k, set] of staff) mcAt(k).employees = set.size;
   for (const r of input.studies) {
     if (r.port !== port || !r.monthKey || (opts.lastMonth && r.monthKey > opts.lastMonth)) continue;
     const v = mcAt(r.monthKey);
+    v.studied += 1;
     if (r.imageStatus === STATUS_MISSED) v.missed += 1;
     else if (r.imageStatus === STATUS_FALSE_SUSPICION) v.falseSuspicion += 1;
   }
   // The same ports tiered by images received per month (thirds), and ports grouped by نسبة التوائم.
-  workload.imageTiers = buildWorkloadTiers(portWorkloads.filter((p) => workloadMeasure(p) !== null), (p) => p.imagesPerMonth);
   workload.accuracyGroups = accuracyGroups(input.studies, port);
   workload.monthlyCounts = [...mc.values()].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   // Yearly population for the appendix (images only; the source has no reliable suspicion split).
@@ -153,7 +228,11 @@ export function buildPortReport(data: PortReportData, opts: PortReportOptions): 
   input.population = [...popRows.values()] as PortReportInput["population"];
   if (!listReportPorts(input).includes(port)) throw new Error(`port not in workbook: ${port}`);
   const model = buildPortReportModel(input, port, opts.displayName ? { displayName: opts.displayName } : {});
-  return { model, workload, html: buildPortReportHtml(model, workload), observations: buildPortObservations(model, workload) };
+  workload.selectedEmployeeMean = model.distribution.mean;
+  workload.selectedEmployees = model.distribution.tiered;
+  const portNames = Object.fromEntries([...new Set(data.workloadMonths.map((x) => x.port))].map((p) => [p, canon(p)]));
+  const keepMonth = (ym: string) => inReportYears(ym) && (!opts.lastMonth || ym <= opts.lastMonth) && !excludeYears.has(ym.slice(0, 4));
+  return { model, workload, html: buildPortReportHtml(model, workload), observations: buildPortObservations(model, workload), studies: input.studies, portNames, keepMonth };
 }
 
 // ── The data workbook ───────────────────────────────────────────────────────────────────────────
@@ -172,6 +251,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   const outcome = (label: string | number, o: O) => [label, o.studied, pct(o.accuracy), o.trueSuspicion, o.trueClear, o.missed, o.falseSuspicion];
   const outcomeHead = ["البند", "المدروسة", "نسبة التوائم", "اشتباه صحيح", "سليمة صحيحة", "الاشتباه الفائت", "الاشتباه الخاطئ"];
   const employee = (e: PortReportModel["employees"][number]) => [e.code, e.name, e.l1Studied, e.l1Matched, e.l2Studied, e.l2Matched, e.studied, e.matched, e.missed, e.falseSuspicion, pct(e.accuracy)];
+  const minStudied = employeeMinStudied(m.employees);
   const employeeHead = ["الكود", "الموظف", "مدروسة - المستوى الأول", "متوافقة - المستوى الأول", "مدروسة - المستوى الثاني", "متوافقة - المستوى الثاني", "إجمالي المدروسة", "إجمالي المتوافقة", "الاشتباه الفائت", "الاشتباه الخاطئ", "نسبة التوائم"];
   const tierOf = (port: string) => workload.tiers.find((t) => t.ports.some((x) => x.port === port))?.label ?? "";
   const allPorts = workload.tiers.flatMap((t) => t.ports);
@@ -195,8 +275,8 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
       ([[m.displayName, m.selected], ["جميع المنافذ", m.allPorts]] as const).flatMap(([n, sc]) => [[n, ...outcome("المستوى الأول", sc.l1)], [n, ...outcome("المستوى الثاني", sc.l2)]])],
     ["مستويات دقة الموظفين", ["الفئة", "تبدأ من", "تنتهي عند", "عدد الموظفين", "متوسط الدقة", "متوسط الحالات لكل موظف"],
       m.distribution.tiers.map((t) => [t.label, t.from, t.to, t.count, pct(t.meanAccuracy), t.meanStudied === null ? null : Math.round(t.meanStudied)])],
-    ["منسوبي المنفذ (30 فأكثر)", employeeHead, m.employees.filter((e) => e.studied >= 30).map(employee)],
-    ["ملحق - أقل من 30 حالة", employeeHead, m.employees.filter((e) => e.studied < 30).map(employee)],
+    ["منسوبي المنفذ (المصنفون)", employeeHead, m.employees.filter((e) => e.studied >= minStudied).map(employee)],
+    [`ملحق - أقل من ${minStudied} حالة`, employeeHead, m.employees.filter((e) => e.studied < minStudied).map(employee)],
   ];
   const share = (n: number, o: O) => (o.studied ? n / o.studied : null);
   const sc = (label: string, o: O) => [label, o.studied, o.trueSuspicion, o.trueClear, o.missed, o.falseSuspicion, o.matched, pct(o.accuracy), share(o.trueSuspicion, o), share(o.trueClear, o), share(o.missed, o), share(o.falseSuspicion, o)];
@@ -212,9 +292,8 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
   sheets.splice(2 + wlSheets.length, 0,
     ["إجماليات مستويات العبء", ["المستوى", "إجمالي الصور", "متوسط الصور في الشهر", "إجمالي الموظفين المخصصين", "متوسط الموظفين في الشهر"], totals.map((t) => [t.label, t.images, round(t.imagesPerMonth), t.people, round(t.staffPerMonth)])],
     ["القوى العاملة حسب المستوى", ["النطاق", "متوسط الصور في الشهر", "متوسط عدد الموظفين في الشهر", "متوسط عدد الحالات المفحوصة للموظف الواحد", "متوسط الحالات للموظف في الشهر - المستوى الأول", "متوسط الحالات للموظف في الشهر - المستوى الثاني"], workforceFigures(workload).map((r) => [r.label, round(r.imagesPerMonth), round(r.staffPerMonth), round(r.perEmployeeMonth), round(r.l1PerMonth), round(r.l2PerMonth)])],
-    ["حدود أثلاث العبء", ["المستوى", "عدد المنافذ", "من (حالة للموظف في الشهر)", "إلى", "متوسط جميع المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]])])],
-    ["حدود أثلاث حجم الصور", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المنافذ"], (workload.imageTiers ?? []).map((t) => [t.label, t.ports.length, round(t.from), round(t.to), t.ports.map((p) => p.port).join("، ")])],
-    ["مستويات الدقة", ["المستوى", "من", "إلى", "المنافذ", "المدروسة", "نسبة التوائم - الأول", "نسبة التوائم - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.ports.join("، "), g.outcomes.image.studied, pct(g.outcomes.l1.accuracy), pct(g.outcomes.l2.accuracy)])],
+    ["حدود مستويات العبء", ["المستوى", "عدد المنافذ", "من (صورة في الشهر)", "إلى", "المتوسط المرجعي (دون الأحجام الاستثنائية)", "المنافذ"], workload.tiers.map((t) => [t.label, t.ports.length, round(t.from), round(t.to), round(workload.tiers[0].averages[types[0]]), t.ports.map((p) => p.port).join("، ")])],
+    ["مستويات دقة الموظفين", ["المستوى", "من", "إلى", "الموظفون", "متوسط دقة الموظفين", "إجابات الأول", "نسبة التوائم - الأول", "الفائت - الأول", "الخاطئ - الأول", "إجابات الثاني", "نسبة التوائم - الثاني", "الفائت - الثاني", "الخاطئ - الثاني"], (workload.accuracyGroups ?? []).map((g) => [g.label, pct(g.from), pct(g.to), g.employees, pct(g.meanAccuracy), g.outcomes.l1.studied, pct(g.outcomes.l1.accuracy), g.outcomes.l1.missed, g.outcomes.l1.falseSuspicion, g.outcomes.l2.studied, pct(g.outcomes.l2.accuracy), g.outcomes.l2.missed, g.outcomes.l2.falseSuspicion])],
     ["المستويان حسب مستوى العبء", ["النطاق", "المستوى", ...scHead], scopes.flatMap(([n, o]) => [[n, ...sc("المستوى الأول", o.l1)], [n, ...sc("المستوى الثاني", o.l2)]])],
     ["الأداء حسب السنة", ["السنة", "النطاق", "المستوى", ...scHead],
       workload.yearly.flatMap((y) => ([[workload.displayName, y.selected], ...workload.tiers.map((t) => [tierLabel(t), y.tiers[t.key]])] as Array<[string, LevelOutcomes | undefined]>)
@@ -225,7 +304,7 @@ export function portReportSheets(build: PortReportBuild): SheetSpec[] {
     ["الخط الزمني الشهري", ["الشهر", `نسبة التوائم - ${m.displayName}`, `المدروسة - ${m.displayName}`, "نسبة التوائم - جميع المنافذ", ...m.groups.filter((g) => g.label !== m.group).map((g) => `نسبة التوائم - ${g.label}`)],
       m.monthly.filter((x) => x.selected !== null || x.all !== null).map((x) => [x.monthKey, pct(x.selected), x.selectedStudied, pct(x.all), ...m.groups.filter((g) => g.label !== m.group).map((g) => pct(x.byGroup[g.label] ?? null))])],
     ["المستويان حسب نوع المنفذ", ["نوع المنفذ", "إجابات المستوى الأول", "نسبة التوائم - الأول", "إجابات المستوى الثاني", "نسبة التوائم - الثاني"], m.groups.map((g) => [g.label, g.l1.studied, pct(g.l1.accuracy), g.l2.studied, pct(g.l2.accuracy)])],
-    ["ملخص دقة الموظفين", ["البند", "القيمة"], [["متوسط نسبة التوائم للموظفين", m.distribution.mean], ["الوسيط", m.distribution.median], ["الموظفون المدروسة حالاتهم", m.employees.length], ["المصنفون (30 حالة فأكثر)", m.distribution.tiered], ["المستبعدون (أقل من 30 حالة)", m.distribution.untiered]]],
+    ["ملخص دقة الموظفين", ["البند", "القيمة"], [["متوسط نسبة التوائم للموظفين", m.distribution.mean], ["الوسيط", m.distribution.median], ["الموظفون المدروسة حالاتهم", m.employees.length], ["حد التصنيف (10% من متوسط الحالات المدروسة للموظف)", minStudied], [`المصنفون (${minStudied} حالة فأكثر)`, m.distribution.tiered], [`المستبعدون (أقل من ${minStudied} حالة)`, m.distribution.untiered]]],
     ["توزيع دقة الموظفين", ["الفئة", "تبدأ من", "تنتهي عند", "عدد الموظفين"], m.distribution.bins.map((b) => [m.distribution.tiers.find((t) => t.key === b.tier)?.label ?? b.tier, b.from, b.to, b.count])],
   );
   // Index first: every sheet.

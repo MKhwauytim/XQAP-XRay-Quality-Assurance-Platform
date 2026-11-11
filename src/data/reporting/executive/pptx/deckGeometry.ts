@@ -60,6 +60,26 @@ function alpha(c: string): number {
 /** An svg element drawn to a PNG data URL at 2x, so charts drawn as svg keep their look. */
 async function svgToPng(svg: SVGSVGElement, w: number, h: number): Promise<string> {
   const clone = svg.cloneNode(true) as SVGSVGElement;
+  // An svg drawn as an image cannot read the page's CSS variables: resolve every var() colour
+  // (fill, stroke) and the background, or the chips come out black and the lines vanish.
+  const view = svg.ownerDocument.defaultView;
+  if (view) {
+    const src = [svg, ...Array.from(svg.querySelectorAll("*"))];
+    const dst = [clone, ...Array.from(clone.querySelectorAll("*"))];
+    src.forEach((n, i) => {
+      const cs = view.getComputedStyle(n);
+      for (const a of ["fill", "stroke"] as const) if ((n.getAttribute(a) ?? "").includes("var(")) dst[i].setAttribute(a, cs[a]);
+    });
+    const bg = view.getComputedStyle(svg).backgroundColor;
+    clone.setAttribute("font-family", view.getComputedStyle(svg).fontFamily);
+    clone.removeAttribute("style");
+    if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+      const vb = svg.viewBox?.baseVal;
+      const rect = svg.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "rect");
+      for (const [k, v] of [["x", String(vb?.x ?? 0)], ["y", String(vb?.y ?? 0)], ["width", vb?.width ? String(vb.width) : "100%"], ["height", vb?.height ? String(vb.height) : "100%"], ["fill", bg]]) rect.setAttribute(k, v);
+      clone.insertBefore(rect, clone.firstChild);
+    }
+  }
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", String(w));
   clone.setAttribute("height", String(h));

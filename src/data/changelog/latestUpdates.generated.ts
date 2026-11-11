@@ -19,59 +19,59 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "title": "show the operator's image id in reports, exports and screens"
   },
   {
-    "version": "v160.5",
-    "date": "2026-11-08",
+    "version": "v160.20",
+    "date": "2026-11-10",
     "bucket": "enhancement",
     "scope": "port report",
-    "title": "pooled staff average, tiers in thirds, size tiers and accuracy groups"
+    "title": "v160.20 accuracy groups built from the other ports' answers, the selected port's staff in their own panel"
   },
   {
-    "version": "v160.4",
-    "date": "2026-11-08",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "2024 removed from the report entirely"
+    "version": "v160.19",
+    "date": "2026-11-10",
+    "bucket": "feature",
+    "scope": "port tool",
+    "title": "v160.19 processed-data Excel (population and samples by quarter, by month above 1M rows, index and dashboards); 2025 result columns exchanged with their codes"
   },
   {
-    "version": "v160.3",
-    "date": "2026-11-08",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "three main sections and a monthly shipments and errors timeline"
-  },
-  {
-    "version": "v160.2",
-    "date": "2026-11-08",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "workforce slide compares cases per employee per month by level"
-  },
-  {
-    "version": "v160.1",
-    "date": "2026-11-08",
+    "version": "v160.18",
+    "date": "2026-11-10",
     "bucket": "fix",
-    "scope": "reports",
-    "title": "PowerPoint and Excel use the Somar font names; the port tool leaves 2024 out by default"
+    "scope": "port report",
+    "title": "v160.18 2025 population sheets read with level-1 and level-2 employees exchanged back"
   },
   {
-    "version": "v160.0",
-    "date": "2026-11-08",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "port report tool, one HTML page that turns the raw workbook into the port report"
+    "version": "v160.17",
+    "date": "2026-11-10",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.17 overall cases per employee from the two levels, median-based workload tiers, study employee codes completed from the 2026 population"
   },
   {
-    "version": "v159.24",
-    "date": "2026-11-07",
+    "version": "v160.16",
+    "date": "2026-11-10",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.16 static exporter also reads the month-split quarter sheets (Q3M7)"
+  },
+  {
+    "version": "v160.15",
+    "date": "2026-11-10",
+    "bucket": "fix",
+    "scope": "port report",
+    "title": "v160.15 read month-split quarter sheets (Q3M7, Q3M8, Q3M9) and the «تاريخ الدخول» header"
+  },
+  {
+    "version": "v160.14",
+    "date": "2026-11-10",
     "bucket": "enhancement",
-    "scope": "reports",
-    "title": "work report email by day, week, month or a picked period, weekends included"
+    "scope": "port report",
+    "title": "v160.14 workload tiers by port image volume, monthly errors as rates, slide order"
   },
   {
-    "version": "v159.23",
-    "date": "2026-11-07",
-    "bucket": "feature",
-    "scope": "reports",
-    "title": "weekly work report email next to the daily one"
+    "version": "v160.13",
+    "date": "2026-11-10",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "v160.13 population and staff-per-month chart up front, studied cases on the monthly chart, employee-accuracy groups for the other ports"
   }
 ];

@@ -50,3 +50,12 @@ describe("somarFace", () => {
     expect(somarFace(700)).toBe("Somar Bold");
   });
 });
+
+describe("somarFace floor", () => {
+  it("lifts Light and Regular to Somar Medium and leaves Bold alone", async () => {
+    const { somarFace } = await import("./deckToPptx");
+    expect(somarFace(300, 500)).toBe("Somar Medium");
+    expect(somarFace(400, 500)).toBe("Somar Medium");
+    expect(somarFace(700, 500)).toBe("Somar Bold");
+  });
+});

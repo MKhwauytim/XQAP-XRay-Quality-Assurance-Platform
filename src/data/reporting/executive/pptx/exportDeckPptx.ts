@@ -8,7 +8,7 @@
 import { downloadBlob } from "../../../../utils/downloadFile";
 import { PRINT_DEFAULT_OFF_CLASS } from "../printSelection";
 import { readDeckGeometry } from "./deckGeometry";
-import { deckToPptx } from "./deckToPptx";
+import { deckToPptx, type DeckPptxOptions } from "./deckToPptx";
 
 const LAYOUT_CSS = `.slide.v3{display:flex!important;transform:none!important;margin:0!important;zoom:1!important}`;
 
@@ -38,10 +38,10 @@ async function withLaidOutDeck<T>(html: string, read: (doc: Document) => Promise
 }
 
 /** The PowerPoint file for a finished deck3 HTML string. */
-export async function deckHtmlToPptx(html: string, title: string): Promise<{ blob: Blob; slides: number }> {
+export async function deckHtmlToPptx(html: string, title: string, options: DeckPptxOptions = {}): Promise<{ blob: Blob; slides: number }> {
   const slides = await withLaidOutDeck(html, readDeckGeometry);
   if (!slides.length) throw new Error("deck has no slides");
-  return { blob: await deckToPptx(slides, title), slides: slides.length };
+  return { blob: await deckToPptx(slides, title, options), slides: slides.length };
 }
 
 /** Builds the PowerPoint file for a finished deck3 HTML string and downloads it as `fileName`. */

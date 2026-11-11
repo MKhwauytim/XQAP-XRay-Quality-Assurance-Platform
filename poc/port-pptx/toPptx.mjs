@@ -26,9 +26,10 @@ const themeVar = (name) => reportHtml.match(new RegExp(`--v3-${name}:(#[0-9a-fA-
 
 // Somar installs on the owner's machines as one family per weight («Somar Light», «Somar», «Somar Medium», «Somar Bold»): Light, Regular,
 // Medium and Bold are four separate faces, so the weight picks the face and bold stays off.
-const FONT = "Somar";
+const FONT = "Somar Medium";
 const FONT_BOLD = "Somar Bold";
-const face = (w) => (w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD);
+// The port report sets Light and Regular text in Somar Medium (owner, 2026-11-10).
+const face = (w0) => { const w = Math.max(w0, 500); return (w <= 350 ? "Somar Light" : w <= 450 ? FONT : w <= 550 ? "Somar Medium" : FONT_BOLD); };
 const FIT_SAFETY = 1.04;
 const inch = (px) => px / 144;
 const pt = (px) => px * 0.5;
@@ -238,6 +239,14 @@ for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slides|charts)\/
     if (last < t.length) parts.push(run(t.slice(last), false));
     return parts.join("");
   });
+  // Page number «NN / TT»: NN becomes PowerPoint's slide-number field, so it stays right when
+  // slides are moved, added or deleted in PowerPoint (a fixed «22» on slide 6 was reported).
+  if (name.includes("slides/")) xml = xml.replace(/<a:r>(<a:rPr\b[^>]*?(?:\/>|>(?:(?!<\/?a:r>)[\s\S])*?<\/a:rPr>))<a:t>(\d{2,3}) \/ (\d+)<\/a:t><\/a:r>/g, (mm, rPr, num, total) => {
+    stats.slideNum = (stats.slideNum ?? 0) + 1;
+    return `<a:fld id="{5C1E9B1A-7D2B-4C3E-9F1A-2B6D8E4A0C11}" type="slidenum">${rPr}<a:t>${num}</a:t></a:fld><a:r>${rPr}<a:t> / ${total}</a:t></a:r>`;
+  });
+  // Two runs in a right-to-left paragraph display in reverse («48 / 25»): the page-number paragraph is left-to-right.
+  if (name.includes("slides/")) xml = xml.replace(/<a:p>((?:(?!<\/a:p>)[\s\S])*?type="slidenum"[\s\S]*?<\/a:p>)/g, (p, inner) => `<a:p>${inner.replace(/<a:pPr\b([^>]*?)rtl="1"/, '<a:pPr$1rtl="0"')}`);
   zip.file(name, xml);
 }
 for (const name of Object.keys(zip.files).filter((n) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(n))) {
