@@ -17,7 +17,7 @@ import {
 import { derivePortCatalog } from "../../../../../data/distribution/portEligibility";
 import "./PhaseFourDistribution.css";
 import { hamiltonApportionment } from "../../../../../data/sampling/apportionment";
-import { originalXrayImageIdAnyImport } from "../../../../../data/adhocImport/adhocImportModel";
+import { exportedXrayImageId } from "../../../../../data/adhocImport/caseOrigin";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -402,7 +402,7 @@ export default function PhaseFourDistribution({
       const entry = entryMap.get(row.xrayImageId);
       const status = entry?.status ?? "unassigned";
       const assignedTo = entry?.assignedTo ?? "";
-      if (q && !originalXrayImageIdAnyImport(row.xrayImageId).toLowerCase().includes(q)) return false;
+      if (q && !exportedXrayImageId(row.xrayImageId).toLowerCase().includes(q)) return false;
       if (manualStatusFilter !== "all" && status !== manualStatusFilter) return false;
       if (manualEmployeeFilter === "unassigned" && assignedTo) return false;
       if (

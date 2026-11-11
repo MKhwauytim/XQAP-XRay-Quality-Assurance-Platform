@@ -26,7 +26,7 @@ import {
   type StageAliasMappings,
 } from "../../population/stageHelpers";
 import { formatMonthLabel } from "../shared/reportChrome";
-import { originalXrayImageIdAnyImport } from "../../adhocImport/adhocImportModel";
+import { exportedXrayImageId } from "../../adhocImport/caseOrigin";
 
 /** Percentage of n over d, or null when the denominator is empty (renders "—"). */
 function ratePct(n: number, d: number): number | null {
@@ -155,12 +155,12 @@ export function computeManagementModel(
   const replacementRecords: ManagementReplacementRecord[] = data.entries
     .filter((e) => e.status === "replaced")
     .map((e) => ({
-      xrayImageId: originalXrayImageIdAnyImport(e.xrayImageId),
+      xrayImageId: exportedXrayImageId(e.xrayImageId),
       username: e.assignedTo,
       displayName: nameOf(e.assignedTo),
       portName: e.row.portName ?? "-",
       reason: replacementReasons[e.xrayImageId] ?? null,
-      replacedById: e.replacedById === null ? null : originalXrayImageIdAnyImport(e.replacedById),
+      replacedById: e.replacedById === null ? null : exportedXrayImageId(e.replacedById),
       lastEventAt: e.lastEventAt,
     }))
     .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));

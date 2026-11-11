@@ -167,6 +167,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 | Error log | `src/data/errorLog/` | Durable per-user error records under `5-system/system-errors/`, fed by a sink registered into `storage/errorLogger.ts`; admin XLSX export. Per-user files and the 6×100 ms casLoop config are copied from `audit/actionLog.ts` for the same SMB-contention reason |
 | Data integrity | `src/data/integrity/` | `orphanScan.ts` — referential-integrity check (B3) across the population → sample → distribution → answers/approvals `xrayImageId` chain |
 | Ad-hoc import | `src/data/adhocImport/` | Admin-uploaded one-off Excel/pasted imports with their own column-mapping workbench, assigned outside the regular Population pipeline; synthesizes a `sample.master.json` for a synthetic month folder. Owns its parsing end-to-end (never routes through the Population ingest) and reaches the rest of the app only through `adhocDistributionBridge.ts`. Also imports already-answered historical studies. Stored under `5-system/adhoc-imports/` |
+| Strategic indicator | `src/data/strategicIndicator/` | The owner's «مؤشر معدل التغطية» workbook as a living template (Reports › `strategic-indicator` sub-tab). `zipContainer.ts` + `sheetXml.ts` rewrite the `.xlsx` at the ZIP/XML level — untouched parts keep their original bytes, so styles, formulas, the chart and the query table survive; SheetJS is deliberately not used here because it drops them. `indicatorTemplate.ts` scans the upload and appends rows under its `Q1_`…`Q4_` / `Samples` tables; `indicatorSystemData.ts` collects what the system holds that the file does not; `indicatorModel.ts` computes the card exactly as the workbook's `COUNTIFS` do. Stored under `5-system/strategic-indicator/` |
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
@@ -200,7 +201,7 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 | `population` | `Tabs/Population/` | all | 10 | `process`, `browse`, `adhoc-import` (grantable to all but guest; default-off for every role but admin) |
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
 | `ew/notifications` | `Tabs/NotificationCenter/` | all (defaults to manager, admin) | 20 | — |
-| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
+| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`), `comprehensive-executive`, `strategic-indicator` (→ `Tabs/Reports/StrategicIndicator/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `changelog` | `Tabs/Changelog/` | all (grantable; none granted by default) | 90 | — |

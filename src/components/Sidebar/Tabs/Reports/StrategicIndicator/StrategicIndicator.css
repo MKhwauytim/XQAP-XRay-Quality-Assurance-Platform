@@ -1,0 +1,113 @@
+.si-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.si-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
+
+.si-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--c-navy);
+}
+
+.si-hint,
+.si-status,
+.si-warn,
+.si-error {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.si-hint { color: var(--c-ink); }
+.si-status { color: var(--c-ink-3); }
+.si-warn { color: var(--c-ink); background: var(--c-surface-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); }
+.si-error { color: var(--c-danger-text); background: var(--c-danger-bg); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); }
+
+.si-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.si-replace {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  color: var(--c-ink-3);
+}
+
+.si-file-input {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  max-width: 100%;
+}
+
+/* The card is as wide as the workbook's: twelve month blocks of five columns. */
+.si-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
+
+.si-card,
+.si-progress {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.si-card { min-width: 100%; }
+
+.si-card th,
+.si-card td,
+.si-progress th,
+.si-progress td {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.si-card thead th,
+.si-progress thead th {
+  background: var(--c-surface-2);
+  color: var(--c-navy);
+  font-weight: 800;
+}
+
+.si-card tfoot th,
+.si-card tfoot td {
+  background: var(--c-surface-2);
+  font-weight: 800;
+}
+
+.si-month { font-size: 14px; }
+/* A month the uploaded workbook's card has no column block for yet. */
+.si-month--new { color: var(--c-primary); }
+
+.si-sticky {
+  position: sticky;
+  inset-inline-start: 0;
+  background: var(--c-surface-2);
+  color: var(--c-navy);
+  z-index: 1;
+}
+
+.si-deficit { color: var(--c-danger-text); }
+
+.si-progress { align-self: flex-start; }

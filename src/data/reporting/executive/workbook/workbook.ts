@@ -15,7 +15,7 @@ import {
   hasSourceRevisions,
 } from "../../sourceRevisions";
 import { yieldToMain } from "../../../storage/yieldToMain";
-import { originalXrayImageIdAnyImport } from "../../../adhocImport/adhocImportModel";
+import { caseOriginLabel, exportedXrayImageId } from "../../../adhocImport/caseOrigin";
 import { buildDeckSupportSheets } from "../deck3/supportData";
 
 // Population-scale sheet builders (rowSheet, rawRiskSheet, resultComparisonSheet)
@@ -371,6 +371,7 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
     "دقيق", "م.أول دقيق", "م.ثاني دقيق", "تصنيف التحقق",
     // A2: appended only for a month that has snapshot rows, so other months' sheets are unchanged.
     ...(hasSnapshotRows ? [getLabels().report_sample_snapshot_column] : []),
+    getLabels().case_origin_column,
   ];
 
   const body: Cell[][] = [];
@@ -378,7 +379,7 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
     const chunk = model.rows.slice(i, i + EXPORT_CHUNK_SIZE);
     for (const r of chunk) {
       body.push([
-        originalXrayImageIdAnyImport(r.xrayImageId),
+        exportedXrayImageId(r.xrayImageId),
         text(r.portName),
         text(r.stage),
         id(r.levelOneEmployeeId),
@@ -411,6 +412,7 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
         yesNo(r.levelTwoAccurate),
         text(r.verificationCategory),
         ...(hasSnapshotRows ? [r.fromSampleSnapshot ? "نعم" : ""] : []),
+        caseOriginLabel(r.xrayImageId),
       ]);
     }
     if (model.rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
@@ -507,7 +509,7 @@ async function rawBiSheet(rows: PreparedPopulationRow[]): Promise<Cell[][]> {
       const filled = new Set(row.biFilledFields);
       const raw = row.rawRow ?? {};
       body.push([
-        originalXrayImageIdAnyImport(row.xrayImageId),
+        exportedXrayImageId(row.xrayImageId),
         text(row.portName),
         text(row.biEnrichmentStatus),
         ...fieldKeys.map((key): Cell => {
@@ -575,7 +577,7 @@ function factTableSheet(model: ReportModel): Cell[][] {
     ],
     ...model.factTable.map((rec) => [
       text(rec.periodId),
-      originalXrayImageIdAnyImport(rec.xrayImageId),
+      exportedXrayImageId(rec.xrayImageId),
       text(rec.portCode),
       text(rec.portName),
       text(rec.portType),
@@ -629,7 +631,7 @@ async function resultComparisonSheet(
       const pop = popById.get(img.xrayImageId);
       const other = pop?.otherResults;
       body.push([
-        originalXrayImageIdAnyImport(img.xrayImageId),
+        exportedXrayImageId(img.xrayImageId),
         text(img.portName),
         ...ALL_SOURCES.map((s) => result(img.results[s])),
         text(other?.manual.code ?? null),
@@ -912,12 +914,13 @@ async function comprehensiveRowSheet(model: ReportModel): Promise<Cell[][]> {
     "محسوب: النتيجة المجمّعة للصورة", "محسوب: سبب عدم وجود الصورة", "محسوب: اتفاق نتيجة الصورة",
     "محسوب: اتفاق المستوى الأول", "محسوب: اتفاق المستوى الثاني", "محسوب: تصنيف التحقق",
     "محسوب: نتيجة أخرى للمستوى الأول", "محسوب: نتيجة أخرى للمستوى الثاني",
+    `محسوب: ${getLabels().case_origin_column}`,
   ];
   const body: Cell[][] = [];
   for (let i = 0; i < model.rows.length; i += EXPORT_CHUNK_SIZE) {
     for (const r of model.rows.slice(i, i + EXPORT_CHUNK_SIZE)) {
       body.push([
-        originalXrayImageIdAnyImport(r.xrayImageId), text(r.stage), text(r.portType), text(r.portName),
+        exportedXrayImageId(r.xrayImageId), text(r.stage), text(r.portType), text(r.portName),
         // An «other» level result is shown as the workbook had it, never as the سليمة placeholder the fold uses.
         r.levelOneOther ?? result(r.levelOneResult), r.levelTwoOther ?? result(r.levelTwoResult), result(r.expertResult),
         yesNo(r.imageAvailable), yesNo(r.hasMarking), text(r.imageQuality), text(r.lowQualityReason), text(r.suspicionLevel),
@@ -928,6 +931,7 @@ async function comprehensiveRowSheet(model: ReportModel): Promise<Cell[][]> {
         yesNo(r.levelOneAccurate), yesNo(r.levelTwoAccurate),
         r.verificationCategory ? (VERIFICATION_AR[r.verificationCategory] ?? r.verificationCategory) : DASH,
         r.levelOneOther ?? DASH, r.levelTwoOther ?? DASH,
+        caseOriginLabel(r.xrayImageId),
       ]);
     }
     if (model.rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();

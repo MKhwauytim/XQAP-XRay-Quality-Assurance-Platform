@@ -63,6 +63,7 @@ test("POPULATION_SUBFOLDERS, SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, REPORTS_SUB
     adhocImports: "adhoc-imports",
     systemErrors: "system-errors",
     history: "history",
+    strategicIndicator: "strategic-indicator",
   });
   expect(REPORTS_SUBFOLDERS).toEqual({ designs: "designs" });
 });

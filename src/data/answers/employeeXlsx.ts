@@ -4,7 +4,8 @@ import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 import type { DistributionEntry } from "../distribution/distributionTypes";
 import type { ItemAnswer } from "./answerTypes";
-import { originalXrayImageIdAnyImport } from "../adhocImport/adhocImportModel";
+import { caseOriginLabel, exportedXrayImageId } from "../adhocImport/caseOrigin";
+import { getLabels } from "../labels/labelsStore";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "قيد المراجعة",
@@ -49,6 +50,7 @@ export async function writeEmployeeXlsx(
     "نتيجة الفحص 1",
     "نتيجة الفحص 2",
     "الحالة",
+    getLabels().case_origin_column,
     ...(hasAnswers ? ["تاريخ الرفع", ...fieldIds] : []),
   ];
 
@@ -56,7 +58,7 @@ export async function writeEmployeeXlsx(
     const r = e.row;
     const ans = answerMap.get(e.xrayImageId);
     const base: (string | null)[] = [
-      originalXrayImageIdAnyImport(e.xrayImageId),
+      exportedXrayImageId(e.xrayImageId),
       r.portName ?? "",
       r.certScanStatus,
       r.xrayEntryDate ?? "",
@@ -64,6 +66,7 @@ export async function writeEmployeeXlsx(
       r.xrayLevelOneResult,
       r.xrayLevelTwoResult,
       STATUS_LABELS[e.status] ?? e.status,
+      caseOriginLabel(e.xrayImageId),
     ];
     if (hasAnswers) {
       base.push(ans?.submittedAt ?? "");
