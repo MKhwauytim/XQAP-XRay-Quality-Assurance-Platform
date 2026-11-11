@@ -26,6 +26,7 @@ import {
   type StageAliasMappings,
 } from "../../population/stageHelpers";
 import { formatMonthLabel } from "../shared/reportChrome";
+import { originalXrayImageIdAnyImport } from "../../adhocImport/adhocImportModel";
 
 /** Percentage of n over d, or null when the denominator is empty (renders "—"). */
 function ratePct(n: number, d: number): number | null {
@@ -52,6 +53,7 @@ export type ManagementBucket = {
 };
 
 export type ManagementReplacementRecord = {
+  /** The id as the operator knows it: printed only, never joined on. Same for `replacedById`. */
   xrayImageId: string;
   /** The employee the image was replaced FROM (its assignee at replacement time). */
   username: string;
@@ -153,12 +155,12 @@ export function computeManagementModel(
   const replacementRecords: ManagementReplacementRecord[] = data.entries
     .filter((e) => e.status === "replaced")
     .map((e) => ({
-      xrayImageId: e.xrayImageId,
+      xrayImageId: originalXrayImageIdAnyImport(e.xrayImageId),
       username: e.assignedTo,
       displayName: nameOf(e.assignedTo),
       portName: e.row.portName ?? "-",
       reason: replacementReasons[e.xrayImageId] ?? null,
-      replacedById: e.replacedById,
+      replacedById: e.replacedById === null ? null : originalXrayImageIdAnyImport(e.replacedById),
       lastEventAt: e.lastEventAt,
     }))
     .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt));

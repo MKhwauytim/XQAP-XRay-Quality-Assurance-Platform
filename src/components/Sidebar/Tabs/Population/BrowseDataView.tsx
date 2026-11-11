@@ -37,6 +37,7 @@ import { cycleTableSort } from "../../../../utils/tableSort";
 import CertScanFilterChips from "../../../CertScanFilterChips/CertScanFilterChips";
 import { certScanFilterFromColumnFilters, withCertScanFilter } from "../../../../data/population/certScanFilter";
 import { getBrowseDisplayValue } from "./browseDisplayValue";
+import { AddToSampleButton } from "./AddToSampleButton";
 import { stageLabelRank } from "../../../../data/population/stageLabels";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {
@@ -427,7 +428,8 @@ export default function BrowseDataView({
   refreshKey,
   username,
   config,
-  canExportReports
+  canExportReports,
+  canDistributeSamples = false
 }: {
   directoryHandle: unknown;
   refreshKey: number;
@@ -444,6 +446,8 @@ export default function BrowseDataView({
    * per CLAUDE.md.
    */
   canExportReports: boolean;
+  /** Gates «إضافة للعينة»; the data layer re-checks the roster and the month lock on write. */
+  canDistributeSamples?: boolean;
 }) {
   const { selection: globalMonth } = useGlobalMonth();
   const labels = useLabels();
@@ -1006,6 +1010,24 @@ export default function BrowseDataView({
     setPage(1);
   }
 
+  /** Ids of every population row the current search and filters match, or null if the read was interrupted. */
+  async function collectFilteredIds(): Promise<string[] | null> {
+    const { rows: matching, complete } = await collectMatchingRows(
+      { search: debouncedSearch, columnFilters, sort },
+      Number.POSITIVE_INFINITY,
+      (queryParams) =>
+        useWorkerPath
+          ? worker.runQuery(queryParams, EXPORT_QUERY_LANE)
+          : runPopulationQuery(
+              filterRowsByMonth(rows, showAllMonths, globalFolder),
+              queryParams,
+              (row, key) => getBrowseDisplayValue(row, key, config.stageMappings)
+            )
+    );
+    if (!complete) return null;
+    return matching.map((row) => row["xrayImageId"]).filter((id): id is string => typeof id === "string" && id !== "");
+  }
+
   async function exportFilteredRowsToXlsx(): Promise<void> {
     // Handler boundary (DEFECT 4) — the button is also disabled without this
     // capability, but a stale render must never be able to egress the month.
@@ -1223,6 +1245,16 @@ export default function BrowseDataView({
             >
               {isExporting ? labels.dt_exporting : "تصدير XLSX"}
             </button>
+            {canDistributeSamples && dataset === "population" && !showAllMonths && globalFolder && (
+              <AddToSampleButton
+                directoryHandle={directoryHandle as Parameters<typeof loadBrowseRows>[0]}
+                month={globalFolder}
+                hasFilter={Boolean(search) || activeFilterCount > 0}
+                collectIds={collectFilteredIds}
+                portRestrictions={config.employeePortRestrictions}
+                username={username}
+              />
+            )}
             {exportError && (
               <span className="bv-export-error" role="alert">
                 {exportError}

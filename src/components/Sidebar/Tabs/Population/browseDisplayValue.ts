@@ -2,6 +2,7 @@ import type { BrowseRow } from "../../../../data/population/populationStorage";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PopulationConfig } from "../../../../data/population/populationConfig";
 import { formatStageLabel } from "./components/helpers";
+import { originalXrayImageIdAnyImport } from "../../../../data/adhocImport/adhocImportModel";
 
 // Split out of BrowseDataView.tsx so tests (and the C2 worker/fallback parity
 // test) can use the REAL formatter; a component file may not export non-components.
@@ -45,6 +46,11 @@ export function getBrowseDisplayValue(
 
   if (key === "_monthFolder") {
     return formatMonthFolderLabel(String(row[key] ?? ""));
+  }
+
+  // A merged exceptional case is stored under an `ADHOC-…` key; show the operator's id.
+  if (key === "xrayImageId" && typeof row[key] === "string") {
+    return originalXrayImageIdAnyImport(row[key]);
   }
 
   return formatBrowseCellValue(row[key]);

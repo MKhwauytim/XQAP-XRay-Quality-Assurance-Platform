@@ -86,3 +86,16 @@ describe("computeManagementModel", () => {
     expect(m.totals.completionRate).toBeNull();
   });
 });
+
+describe("computeManagementModel — exceptional cases", () => {
+  it("prints the operator's id, not the ADHOC storage key, and still resolves the reason by the stored id", () => {
+    const stored = "ADHOC-adh-3f8a1b2c-1111-4222-8333-944455556666-66B4202601060043";
+    const dist = makeDistribution([
+      { id: stored, assignedTo: "u1", status: "replaced", row: makeRow(stored, "منفذ أ"), replacedById: "ADHOC-adh-3f8a1b2c-1111-4222-8333-944455556666-R1-66B4202601060099" },
+    ], { totalAssigned: 1, totalCompleted: 0, totalPending: 0, totalReplaced: 1 });
+    const m = computeManagementModel(dist, "1-January-2026", {}, [], { [stored]: "جودة صورة رديئة" });
+    expect(m.replacements.records[0]).toMatchObject({
+      xrayImageId: "66B4202601060043", replacedById: "66B4202601060099", reason: "جودة صورة رديئة",
+    });
+  });
+});

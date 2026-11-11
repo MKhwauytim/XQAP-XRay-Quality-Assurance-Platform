@@ -5,6 +5,7 @@ import { runPopulationQuery } from "../data/population/populationQuery";
 import { formatMonthFolderShortLabel, parseMonthFolderName } from "../data/population/monthFolder";
 import type { StageAliasMappings } from "../data/population/populationConfig";
 import { STAGE_KEY_ORDER, STAGE_LABELS_AR } from "../data/population/stageLabels";
+import { originalXrayImageIdAnyImport } from "../data/adhocImport/adhocImportModel";
 import type { PopulationQueryWorkerRequest, PopulationQueryWorkerResponse } from "./populationQueryWorkerTypes";
 
 // This worker never receives a DirectoryHandleLike/FileSystemDirectoryHandle — the
@@ -145,6 +146,10 @@ function getWorkerDisplayValue(
   }
   if (key === "_monthFolder") {
     return formatMonthFolderShortLabel(String(row[key] ?? ""));
+  }
+  // Mirrors getBrowseDisplayValue: search, filter and sort see the id that is on screen.
+  if (key === "xrayImageId" && typeof row[key] === "string") {
+    return originalXrayImageIdAnyImport(row[key]);
   }
   return formatDisplayValue(row[key]);
 }

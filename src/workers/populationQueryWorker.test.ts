@@ -396,4 +396,16 @@ describe("populationQueryWorker stage-alias memoization", () => {
     expect(filterByStageLabel(stateA, "المستوى الأول")).toBe(1);
     expect(filterByStageLabel(stateB, "المستوى الثالث")).toBe(1);
   });
+
+  it("an exceptional case merged into a month is searched by the operator's id, not the ADHOC storage key", () => {
+    const rows = [{ xrayImageId: "ADHOC-adh-3f8a1b2c-1111-4222-8333-944455556666-66B4202601060043" }, { xrayImageId: "202601120020080070" }];
+    const loaded = handleWorkerMessage(createInitialWorkerState(), { type: "load", requestId: 1, rawJsonText: rawPopulationJson(rows) });
+    const count = (search: string): number => {
+      const outcome = handleWorkerMessage(loaded.state, { type: "query", requestId: 2, params: baseQueryParams({ search }) });
+      if (outcome.response.type !== "result") throw new Error("expected result response");
+      return outcome.response.result.totalRows;
+    };
+    expect(count("66B4202601060043")).toBe(1);
+    expect(count("adh-3f8a")).toBe(0);
+  });
 });

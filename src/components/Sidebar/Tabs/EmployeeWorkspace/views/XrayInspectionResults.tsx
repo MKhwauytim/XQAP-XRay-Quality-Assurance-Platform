@@ -72,6 +72,7 @@ import { classifyAnswerState, trackingDoneAt, type TrackingRow } from "../../../
 import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useWorkspaceStageMappings } from "../../../../../hooks/useWorkspaceStageMappings";
 import { useTabActive } from "../../../../../app/tabActiveContext";
+import { originalXrayImageIdAnyImport } from "../../../../../data/adhocImport/adhocImportModel";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -1168,9 +1169,9 @@ function buildAuditColumns(): DataTableCol<AuditRow>[] {
   return [
     { id: "kind", label: "النوع", widthFr: 9, accessor: (row) => row.kind === "replacement" ? "استبدال" : "إحالة/نقل" },
     { id: "status", label: "الحالة", widthFr: 8, accessor: (row) => getAuditStatusLabel(row.status) },
-    { id: "xrayImageId", label: "معرف الأشعة", widthFr: 17, alwaysVisible: true, filterKind: "text", accessor: (row) => row.xrayImageId },
-    { id: "originalXrayImageId", label: "العينة الأصلية", widthFr: 17, filterKind: "text", accessor: (row) => row.originalXrayImageId },
-    { id: "replacementXrayImageId", label: "العينة البديلة", widthFr: 17, filterKind: "text", accessor: (row) => row.replacementXrayImageId },
+    { id: "xrayImageId", label: "معرف الأشعة", widthFr: 17, alwaysVisible: true, filterKind: "text", accessor: (row) => originalXrayImageIdAnyImport(row.xrayImageId) },
+    { id: "originalXrayImageId", label: "العينة الأصلية", widthFr: 17, filterKind: "text", accessor: (row) => row.originalXrayImageId && originalXrayImageIdAnyImport(row.originalXrayImageId) },
+    { id: "replacementXrayImageId", label: "العينة البديلة", widthFr: 17, filterKind: "text", accessor: (row) => row.replacementXrayImageId && originalXrayImageIdAnyImport(row.replacementXrayImageId) },
     { id: "fromEmployee", label: "من", widthFr: 10, accessor: (row) => row.fromEmployee },
     { id: "toEmployee", label: "إلى", widthFr: 10, accessor: (row) => row.toEmployee },
     { id: "reason", label: "السبب", widthFr: 22, filterKind: "text", accessor: (row) => row.reason },

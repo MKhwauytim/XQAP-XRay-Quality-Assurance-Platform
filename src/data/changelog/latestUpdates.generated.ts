@@ -5,6 +5,27 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v160.7",
+    "date": "2026-11-11",
+    "bucket": "feature",
+    "scope": "population browse",
+    "title": "add the filtered rows to the month's sample and split them between chosen employees"
+  },
+  {
+    "version": "v160.6",
+    "date": "2026-11-11",
+    "bucket": "fix",
+    "scope": "exceptional cases",
+    "title": "show the operator's image id in reports, exports and screens"
+  },
+  {
+    "version": "v160.20",
+    "date": "2026-11-10",
+    "bucket": "enhancement",
+    "scope": "port report",
+    "title": "v160.20 accuracy groups built from the other ports' answers, the selected port's staff in their own panel"
+  },
+  {
     "version": "v160.19",
     "date": "2026-11-10",
     "bucket": "feature",
@@ -52,26 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "enhancement",
     "scope": "port report",
     "title": "v160.13 population and staff-per-month chart up front, studied cases on the monthly chart, employee-accuracy groups for the other ports"
-  },
-  {
-    "version": "v160.12",
-    "date": "2026-11-10",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "v160.12 PowerPoint text in Somar Medium, staff-load tier slides labelled by port image volume"
-  },
-  {
-    "version": "v160.11",
-    "date": "2026-11-09",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "v160.11 missed and false suspicion rates on the staff accuracy and port-type slides"
-  },
-  {
-    "version": "v160.10",
-    "date": "2026-11-09",
-    "bucket": "fix",
-    "scope": "pptx",
-    "title": "v160.10 svg charts keep their colours in the port tool's PowerPoint"
   }
 ];

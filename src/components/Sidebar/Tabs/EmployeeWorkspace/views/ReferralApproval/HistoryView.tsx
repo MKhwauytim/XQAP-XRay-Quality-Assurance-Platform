@@ -8,6 +8,7 @@ import type { ReferralRequest } from "../../../../../../data/referral/referralTy
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import { KIND_LABELS, STATUS_BADGE_CLASS, STATUS_BADGE_LABEL } from "./requestKind";
 import RequestTimeline from "./RequestTimeline";
+import { originalXrayImageIdAnyImport } from "../../../../../../data/adhocImport/adhocImportModel";
 
 type HistoryRow = {
   key: string;
@@ -57,7 +58,7 @@ function SampleIdList({ ids }: { ids: string[] }) {
 
   async function copyAll(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(ids.join("\n"));
+      await navigator.clipboard.writeText(ids.map(originalXrayImageIdAnyImport).join("\n"));
       setCopied(true);
     } catch {
       // Clipboard access can be denied or unavailable; the ids stay on screen,
@@ -84,7 +85,7 @@ function SampleIdList({ ids }: { ids: string[] }) {
       </div>
       <div className="ew-referral-ids-list" style={{ maxHeight: 220, overflowY: "auto" }}>
         {shown.map((id) => (
-          <span key={id} className="ew-referral-id-chip dt-mono">{id}</span>
+          <span key={id} className="ew-referral-id-chip dt-mono">{originalXrayImageIdAnyImport(id)}</span>
         ))}
       </div>
       {!showAll && ids.length > ID_PREVIEW_LIMIT && (
@@ -148,7 +149,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
               collected.push({
                 key: `replacement-${r.requestId}`, kind: "replacement", monthFolderName: month.folderName,
                 requester: userDisplayMap[r.employeeUsername] ?? r.employeeUsername,
-                details: `${r.originalXrayImageId} → ${r.replacementXrayImageId}`,
+                details: `${originalXrayImageIdAnyImport(r.originalXrayImageId)} → ${originalXrayImageIdAnyImport(r.replacementXrayImageId)}`,
                 reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
                 xrayImageIds: [r.originalXrayImageId, r.replacementXrayImageId],
@@ -159,7 +160,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
               collected.push({
                 key: `reopen-${r.requestId}`, kind: "reopen", monthFolderName: month.folderName,
                 requester: userDisplayMap[r.employeeUsername] ?? r.employeeUsername,
-                details: `إعادة فتح: ${r.xrayImageId}`,
+                details: `إعادة فتح: ${originalXrayImageIdAnyImport(r.xrayImageId)}`,
                 reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
                 xrayImageIds: [r.xrayImageId],

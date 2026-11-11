@@ -4,6 +4,7 @@ import type { DistributionEntry } from "../../../../../data/distribution/distrib
 import type { EmployeePortRestriction } from "../../../../../data/population/populationConfig";
 import { isPortEligible, normalizePortName } from "../../../../../data/distribution/portEligibility";
 import { getLabels } from "../../../../../data/labels/labelsStore";
+import { originalXrayImageIdAnyImport } from "../../../../../data/adhocImport/adhocImportModel";
 
 const STATUS_LABELS: Record<string, string> = {
   unassigned: "غير معين",
@@ -83,7 +84,7 @@ export default function DistributionRow({
 
   return (
     <div className="p4-manual-row distribution-row" role="row" data-status={status}>
-      <span className="dist-cell mono">{row.xrayImageId}</span>
+      <span className="dist-cell mono">{originalXrayImageIdAnyImport(row.xrayImageId)}</span>
       <span className="dist-cell">{row.portName ?? ""}</span>
       <span className="dist-cell">{row.certScanStatus}</span>
       <span className="dist-cell">
