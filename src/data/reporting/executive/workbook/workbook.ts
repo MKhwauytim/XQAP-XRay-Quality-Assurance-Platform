@@ -15,6 +15,7 @@ import {
   hasSourceRevisions,
 } from "../../sourceRevisions";
 import { yieldToMain } from "../../../storage/yieldToMain";
+import { originalXrayImageIdAnyImport } from "../../../adhocImport/adhocImportModel";
 import { buildDeckSupportSheets } from "../deck3/supportData";
 
 // Population-scale sheet builders (rowSheet, rawRiskSheet, resultComparisonSheet)
@@ -377,7 +378,7 @@ async function rowSheet(model: ReportModel): Promise<Cell[][]> {
     const chunk = model.rows.slice(i, i + EXPORT_CHUNK_SIZE);
     for (const r of chunk) {
       body.push([
-        r.xrayImageId,
+        originalXrayImageIdAnyImport(r.xrayImageId),
         text(r.portName),
         text(r.stage),
         id(r.levelOneEmployeeId),
@@ -506,7 +507,7 @@ async function rawBiSheet(rows: PreparedPopulationRow[]): Promise<Cell[][]> {
       const filled = new Set(row.biFilledFields);
       const raw = row.rawRow ?? {};
       body.push([
-        row.xrayImageId,
+        originalXrayImageIdAnyImport(row.xrayImageId),
         text(row.portName),
         text(row.biEnrichmentStatus),
         ...fieldKeys.map((key): Cell => {
@@ -574,7 +575,7 @@ function factTableSheet(model: ReportModel): Cell[][] {
     ],
     ...model.factTable.map((rec) => [
       text(rec.periodId),
-      rec.xrayImageId,
+      originalXrayImageIdAnyImport(rec.xrayImageId),
       text(rec.portCode),
       text(rec.portName),
       text(rec.portType),
@@ -628,7 +629,7 @@ async function resultComparisonSheet(
       const pop = popById.get(img.xrayImageId);
       const other = pop?.otherResults;
       body.push([
-        img.xrayImageId,
+        originalXrayImageIdAnyImport(img.xrayImageId),
         text(img.portName),
         ...ALL_SOURCES.map((s) => result(img.results[s])),
         text(other?.manual.code ?? null),
@@ -916,7 +917,7 @@ async function comprehensiveRowSheet(model: ReportModel): Promise<Cell[][]> {
   for (let i = 0; i < model.rows.length; i += EXPORT_CHUNK_SIZE) {
     for (const r of model.rows.slice(i, i + EXPORT_CHUNK_SIZE)) {
       body.push([
-        r.xrayImageId, text(r.stage), text(r.portType), text(r.portName),
+        originalXrayImageIdAnyImport(r.xrayImageId), text(r.stage), text(r.portType), text(r.portName),
         // An «other» level result is shown as the workbook had it, never as the سليمة placeholder the fold uses.
         r.levelOneOther ?? result(r.levelOneResult), r.levelTwoOther ?? result(r.levelTwoResult), result(r.expertResult),
         yesNo(r.imageAvailable), yesNo(r.hasMarking), text(r.imageQuality), text(r.lowQualityReason), text(r.suspicionLevel),

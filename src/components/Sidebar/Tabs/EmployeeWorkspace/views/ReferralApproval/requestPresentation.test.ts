@@ -80,6 +80,13 @@ describe("requestTitle", () => {
   it("names the case for a reopen", () => {
     expect(requestTitle(reopen, display)).toBe("إعادة فتح الحالة IMG-REOPEN");
   });
+
+  it("names an exceptional case by the operator's id, not the ADHOC storage key", () => {
+    const adhoc = (id: string) => `ADHOC-adh-3f8a1b2c-1111-4222-8333-944455556666-${id}`;
+    expect(requestTitle({ ...reopen, xrayImageId: adhoc("66B4") }, display)).toBe("إعادة فتح الحالة 66B4");
+    expect(requestTitle({ ...replacement, originalXrayImageId: adhoc("66B4"), replacementXrayImageId: adhoc("77C5") }, display))
+      .toBe("استبدال 66B4 بـ 77C5");
+  });
 });
 
 describe("affectedEmployee", () => {

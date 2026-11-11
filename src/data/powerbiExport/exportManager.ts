@@ -9,6 +9,7 @@ import { DEFAULT_EXEC_CONFIG } from "../reporting/executiveReportTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { ExportManifest } from "./exportTypes";
 import { writeCsvExport } from "./exportWriter";
+import { originalXrayImageIdAnyImport } from "../adhocImport/adhocImportModel";
 
 const POPULATION_HEADERS = [
   "xrayImageId", "portName", "portType", "stage",
@@ -56,7 +57,8 @@ export async function runPowerBiExportDetailed(
   // population.csv stays the population; sample.csv keeps them so their
   // answers are not lost.
   const snapshotRowCount = execRows.filter((r) => r.fromSampleSnapshot).length;
-  const allRows: Record<string, unknown>[] = execRows.map((r) => r as Record<string, unknown>);
+  // Exceptional cases are stored under an `ADHOC-…` key; the file carries the id the operator knows.
+  const allRows: Record<string, unknown>[] = execRows.map((r) => ({ ...r, xrayImageId: originalXrayImageIdAnyImport(r.xrayImageId) }));
   const populationRowsOut = snapshotRowCount > 0 ? allRows.filter((r) => r["fromSampleSnapshot"] !== true) : allRows;
   const sampleRowsOut = allRows.filter((r) => r["selectedInSample"] === true);
 

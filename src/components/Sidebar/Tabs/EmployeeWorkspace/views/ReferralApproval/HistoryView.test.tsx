@@ -125,7 +125,7 @@ describe("HistoryView sample ids", () => {
 // invisible here too — the exact blind spot useApprovalData's docblock claims
 // the history tab covers.
 describe("HistoryView ad-hoc import stores", () => {
-  const IMPORT_ID = "adh-1";
+  const IMPORT_ID = "adh-3f8a1b2c-1111-4222-8333-944455556666";
   const ADHOC_FOLDER = adhocMonthFolderName(IMPORT_ID);
   const ADHOC_XRAY_ID = `ADHOC-${IMPORT_ID}-XR-1`;
 
@@ -180,7 +180,8 @@ describe("HistoryView ad-hoc import stores", () => {
     renderHistory(root);
 
     await waitFor(() =>
-      expect(screen.getByText(`إعادة فتح: ${ADHOC_XRAY_ID}`)).toBeInTheDocument()
+      // The operator's id, not the ADHOC storage key the request is filed under.
+      expect(screen.getByText("إعادة فتح: XR-1")).toBeInTheDocument()
     );
     // The real month's own history is still there alongside it.
     expect(screen.getByText("1 عينة → emp-b")).toBeInTheDocument();

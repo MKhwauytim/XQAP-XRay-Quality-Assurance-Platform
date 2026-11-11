@@ -370,8 +370,11 @@ export function namespacedXrayImageId(
 
 /**
  * {@link originalXrayImageId} without the import id: matches both
- * `createImportId` shapes. For de-duplication only, where the import id is
- * unknown because a merged import's record is archived and gone from the index.
+ * `createImportId` shapes. For de-duplication, where the import id is unknown
+ * because a merged import's record is archived and gone from the index, and for
+ * every report, export and screen that prints an id without holding the entry:
+ * the `ADHOC-…` prefix is a storage key, never something to show a person.
+ * A real population id never matches the pattern and is returned as it is.
  */
 export function originalXrayImageIdAnyImport(xrayImageId: string): string {
   const match = /^ADHOC-adh-(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+-[a-z0-9]+)-(?:R\d+-)?(.+)$/i.exec(xrayImageId);
