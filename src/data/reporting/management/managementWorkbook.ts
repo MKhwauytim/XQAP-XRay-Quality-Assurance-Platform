@@ -17,6 +17,7 @@ import {
   hasSourceRevisions,
 } from "../sourceRevisions";
 import { computeManagementModel, type ManagementModel, type ManagementBucket } from "./managementModel";
+import { exportedXrayImageId, exportedXrayImageIdOrNull } from "../../adhocImport/caseOrigin";
 
 type Cell = string | number;
 
@@ -65,7 +66,7 @@ function replacementsSheet(m: ManagementModel): Cell[][] {
   const rows: Cell[][] = [
     ["رقم الأشعة", "الموظف", "المنفذ", "السبب", "البديل", "آخر حدث"],
     ...m.replacements.records.map((r) => [
-      text(r.xrayImageId), text(r.displayName), text(r.portName), text(r.reason), text(r.replacedById), text(r.lastEventAt),
+      text(exportedXrayImageId(r.xrayImageId)), text(r.displayName), text(r.portName), text(r.reason), text(exportedXrayImageIdOrNull(r.replacedById)), text(r.lastEventAt),
     ]),
   ];
   if (m.replacements.byReason.length > 0) {

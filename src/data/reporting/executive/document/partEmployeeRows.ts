@@ -15,6 +15,7 @@ import { fmtNum } from "../primitives";
 import { emptyState, page, pageHeader, panel } from "./shared";
 import { paginateRows } from "./pagination";
 import { yieldToMain } from "../../../storage/yieldToMain";
+import { exportedXrayImageId } from "../../../adhocImport/caseOrigin";
 
 const TABS = ["الجزء السادس"];
 const ROWS_PER_PAGE = 24;
@@ -69,7 +70,7 @@ export async function buildEmployeeRowListingPages(model: ReportModel, startPage
     const displayName = names[reviewerId] ?? reviewerId;
     const sorted = [...records].sort((a, b) => (a.completedAt ?? a.assignedAt ?? "").localeCompare(b.completedAt ?? b.assignedAt ?? ""));
     const rows = sorted.map((r) => [
-      r.xrayImageId, r.portName ?? "-", r.stage ?? "-", levelLabel(r.decisionLevel), r.employeeDecision, r.completedAt ?? r.assignedAt ?? "-",
+      exportedXrayImageId(r.xrayImageId), r.portName ?? "-", r.stage ?? "-", levelLabel(r.decisionLevel), r.employeeDecision, r.completedAt ?? r.assignedAt ?? "-",
     ]);
     const chunks = paginateRows({
       headers: ["رقم الأشعة", "المنفذ", "المستوى", "مرحلة القرار", "الإجابة", "التاريخ"],
