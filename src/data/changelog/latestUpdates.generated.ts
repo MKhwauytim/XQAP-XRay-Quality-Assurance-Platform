@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v161.2",
+    "date": "2026-11-25",
+    "bucket": "feature",
+    "scope": "referrals queue",
+    "title": "request reopen for every submitted case matching the filter"
+  },
+  {
     "version": "v161.0",
     "date": "2026-11-11",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "port report",
     "title": "v160.15 read month-split quarter sheets (Q3M7, Q3M8, Q3M9) and the «تاريخ الدخول» header"
-  },
-  {
-    "version": "v160.14",
-    "date": "2026-11-10",
-    "bucket": "enhancement",
-    "scope": "port report",
-    "title": "v160.14 workload tiers by port image volume, monthly errors as rates, slide order"
   }
 ];

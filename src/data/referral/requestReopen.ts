@@ -20,7 +20,7 @@ import { logError } from "../storage/errorLogger";
 import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
 import { buildReopenRequestedEvent } from "../distribution/distributionLog";
-import { appendReopenRequest } from "./referralStorage";
+import { appendReopenRequest, loadReopenLog } from "./referralStorage";
 import type { ReopenRequest } from "./referralTypes";
 
 export type SubmitReopenResult =
@@ -106,3 +106,71 @@ export async function submitReopenRequest(params: {
 
   return { ok: true, mode: "requested" };
 }
+
+export type BulkReopenCase = { monthFolderName: string; xrayImageId: string; assignedTo: string };
+
+export type BulkReopenResult = {
+  /** Pending requests filed for a supervisor to decide. */
+  requested: number;
+  /** Cases reopened at once (instant mode). */
+  reopened: number;
+  /** Cases left alone because they already have a pending request. */
+  skippedPending: number;
+  failed: number;
+  firstError?: string;
+};
+
+/**
+ * `submitReopenRequest` for every case the queue filter matches (owner,
+ * 2026-11-25): one request per case, written one after another so each lands
+ * through the same CAS path as a single request. A case that already has a
+ * pending request is skipped, so a second click files nothing twice. A failure
+ * on one case does not stop the rest; it is counted and the first error kept.
+ */
+export async function submitReopenRequests(params: {
+  directoryHandle: DirectoryHandleLike;
+  cases: readonly BulkReopenCase[];
+  requestedBy: string;
+  requestedByRole: string;
+  reason: string;
+  instant: boolean;
+}): Promise<BulkReopenResult> {
+  const { directoryHandle, cases, requestedBy, requestedByRole, reason, instant } = params;
+  const result: BulkReopenResult = { requested: 0, reopened: 0, skippedPending: 0, failed: 0 };
+  const pendingByMonth = new Map<string, Set<string>>();
+  for (const item of cases) {
+    let pending = pendingByMonth.get(item.monthFolderName);
+    if (!pending) {
+      const log = await loadReopenLog(directoryHandle, item.monthFolderName);
+      pending = new Set(log.requests.filter((r) => r.status === "pending").map((r) => `${r.employeeUsername}::${r.xrayImageId}`));
+      pendingByMonth.set(item.monthFolderName, pending);
+    }
+    const key = `${item.assignedTo}::${item.xrayImageId}`;
+    if (!instant && pending.has(key)) {
+      result.skippedPending += 1;
+      continue;
+    }
+    const outcome = await submitReopenRequest({
+      directoryHandle,
+      monthFolderName: item.monthFolderName,
+      employeeUsername: item.assignedTo,
+      xrayImageId: item.xrayImageId,
+      assignedTo: item.assignedTo,
+      requestedBy,
+      requestedByRole,
+      reason,
+      instant,
+    });
+    if (!outcome.ok) {
+      result.failed += 1;
+      result.firstError ??= outcome.error;
+    } else if (outcome.mode === "instant") {
+      result.reopened += 1;
+    } else {
+      result.requested += 1;
+      pending.add(key);
+    }
+  }
+  return result;
+}
+

@@ -4,7 +4,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { loadEmployeeAnswers, upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import { loadDistributionLog } from "../distribution/distributionStorage";
-import { submitReopenRequest } from "./requestReopen";
+import { submitReopenRequest, submitReopenRequests } from "./requestReopen";
 import { loadReopenLog } from "./referralStorage";
 import { approveReopen, denyReopen } from "./approveReferral";
 
@@ -156,3 +156,36 @@ describe("approveReopen / denyReopen", () => {
     expect(after.requests[0].status).toBe("denied"); // first decision stands
   });
 });
+
+describe("submitReopenRequests — every case matching the queue filter", () => {
+  const base = { requestedBy: "alice", requestedByRole: "employee", reason: "توفّرت الصور", instant: false };
+  const caseOf = (xrayImageId: string) => ({ monthFolderName: MONTH, xrayImageId, assignedTo: "alice" });
+
+  it("files one pending request per case and skips a case that already has one", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    for (const id of ["IMG-1", "IMG-2", "IMG-3"]) await seedSubmittedAnswer(root, id, "alice");
+    await submitReopenRequest({ directoryHandle: root, ...base, ...caseOf("IMG-2"), employeeUsername: "alice" });
+
+    const result = await submitReopenRequests({ directoryHandle: root, ...base, cases: ["IMG-1", "IMG-2", "IMG-3"].map(caseOf) });
+
+    expect(result).toEqual({ requested: 2, reopened: 0, skippedPending: 1, failed: 0 });
+    const log = await loadReopenLog(root, MONTH);
+    expect(log.requests.map((request) => request.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2", "IMG-3"]);
+    expect(log.requests.every((request) => request.status === "pending")).toBe(true);
+    // A second click files nothing twice.
+    expect(await submitReopenRequests({ directoryHandle: root, ...base, cases: ["IMG-1", "IMG-3"].map(caseOf) }))
+      .toEqual({ requested: 0, reopened: 0, skippedPending: 2, failed: 0 });
+  });
+
+  it("reopens each case at once when the role may reopen instantly", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    for (const id of ["IMG-1", "IMG-2"]) await seedSubmittedAnswer(root, id, "alice");
+
+    const result = await submitReopenRequests({ directoryHandle: root, ...base, instant: true, cases: ["IMG-1", "IMG-2"].map(caseOf) });
+
+    expect(result).toEqual({ requested: 0, reopened: 2, skippedPending: 0, failed: 0 });
+    const file = await loadEmployeeAnswers(root, MONTH, "alice");
+    expect(file.items.map((item) => item.status)).toEqual(["draft", "draft"]);
+  });
+});
+

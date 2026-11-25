@@ -790,6 +790,15 @@ export const DEFAULT_LABELS = {
   ew_reopen_request_btn:        "طلب إعادة فتح الحالة",
   ew_reopen_request_confirm:    "سيتم إرسال طلب لإعادة فتح هذه الحالة. إذا كانت صلاحيتك تسمح بالفتح الفوري فسيُطبَّق مباشرة، وإلا فسيُحوَّل للمشرف للاعتماد.",
   msg_reopen_request_sent:      "تم إرسال طلب إعادة فتح الحالة — بانتظار موافقة المشرف.",
+  // Bulk form: every submitted case of the employee's own that the queue filter matches.
+  ew_reopen_filtered_btn:       "طلب إعادة فتح الكل المطابق للتصفية ({n})",
+  ew_reopen_filtered_title:     "يطلب إعادة فتح حالاتك المقدَّمة المعروضة حالياً حسب التصفية",
+  ew_reopen_filtered_none:      "لا توجد ضمن التصفية الحالية حالات مقدَّمة تخصك يمكن طلب إعادة فتحها.",
+  ew_reopen_filtered_confirm:   "سيُرسل طلب إعادة فتح لكل حالة من {n} حالة مقدَّمة مطابقة للتصفية، وتنتظر موافقة المشرف. الحالات التي لها طلب قيد الانتظار لا يُكرَّر طلبها. اكتب السبب:",
+  ew_reopen_filtered_confirm_instant: "ستُعاد فتح {n} حالة مقدَّمة مطابقة للتصفية فوراً وتعود إلى قائمة عملك. اكتب السبب:",
+  ew_reopen_filtered_done:      "أُرسل {requested} طلب إعادة فتح، وتُركت {skippedPending} حالة لها طلب قيد الانتظار.",
+  ew_reopen_filtered_done_instant: "أُعيد فتح {reopened} حالة.",
+  ew_reopen_filtered_failed:    " تعذّرت {failed} حالة: {error}",
 
   // Backup coverage + restore semantics (Tier-1 Items F/G)
   backup_import_users_labels_btn:  "استيراد المستخدمين والتسميات من النسخة",
