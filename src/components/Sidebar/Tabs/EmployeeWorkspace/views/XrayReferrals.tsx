@@ -95,6 +95,7 @@ import {
   loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
+import { ReopenFilteredButton } from "./XrayReferrals/ReopenFilteredButton";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import type { Labels } from "../../../../../data/labels/labelsStore";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
@@ -701,7 +702,13 @@ function createReopenHandlers(deps: {
     }
   }
 
-  return { handleReopenAnswer, handleRequestReopen };
+  /** After the bulk «طلب إعادة فتح»: same reconcile-then-tell-the-others step as the single request. */
+  async function handleBulkReopenDone(instant: boolean): Promise<void> {
+    await reload();
+    broadcastOwn(instant ? ["answers", "requests", "distribution"] : ["requests"]);
+  }
+
+  return { handleReopenAnswer, handleRequestReopen, handleBulkReopenDone };
 }
 
 /**
@@ -1569,7 +1576,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // returns (an event-handler call chain), never during render — the same exemption the two
   // prop callbacks further down used to carry one each.
   // eslint-disable-next-line react-hooks/refs -- see above
-  const { handleReopenAnswer, handleRequestReopen } = createReopenHandlers({
+  const { handleReopenAnswer, handleRequestReopen, handleBulkReopenDone } = createReopenHandlers({
     directoryHandle,
     folderForRow,
     username,
@@ -1877,7 +1884,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // the row tracks are placed by line number (see XrayReferrals.css): the
         // selection bar is conditional, and auto-placement would re-flow the
         // panel underneath the pagination the moment it appeared.
-        const showSelectionBar = canReassignSamples && entries.length > 0;
+        const showSelectionBar = (canReassignSamples || canSubmitAnswers) && entries.length > 0;
+        // Bulk reopen request: the user's own submitted cases among the filtered rows.
+        const reopenCases = canSubmitAnswers
+          ? filteredTableEntries
+              .filter((e) => e.assignedTo === username && e.status !== "replaced" && isStudied(e))
+              .map((e) => ({ monthFolderName: folderForRow(e.xrayImageId), xrayImageId: e.xrayImageId, assignedTo: e.assignedTo }))
+          : [];
         const tableEl = (
           <div className={`ew-ref-queue ew-xr-grid${showSelectionBar ? " ew-xr-grid--with-bar" : ""}`}>
             {showSelectionBar && (
@@ -1890,6 +1903,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 onReassignFiltered={() => openReassignModal(selectableVisibleIds, "filtered")}
                 onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
+                canReassign={canReassignSamples}
+                extraActions={canSubmitAnswers && (
+                  <ReopenFilteredButton
+                    directoryHandle={directoryHandle}
+                    cases={reopenCases}
+                    username={username}
+                    role={role}
+                    instant={canReopenInstant}
+                    onDone={(instant) => { void handleBulkReopenDone(instant); }}
+                  />
+                )}
               />
             )}
             <DataTable<DistributionEntry>

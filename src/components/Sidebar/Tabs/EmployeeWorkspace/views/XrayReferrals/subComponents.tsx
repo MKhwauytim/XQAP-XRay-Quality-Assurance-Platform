@@ -2,7 +2,7 @@
    used by Tabs/EmployeeWorkspace/index.tsx etc.: this sibling file legitimately exports both
    sub-components and the pure helper functions/constants they (and the main XrayReferrals
    component) share. */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
@@ -283,7 +283,13 @@ export function ReassignSelectionBar({
   onReassignFiltered,
   onSelectAllFiltered,
   onClear,
+  canReassign = true,
+  extraActions,
 }: {
+  /** False for a user who may not file reassignments: the bar then carries only `extraActions`. */
+  canReassign?: boolean;
+  /** Further bulk actions on the filtered set (bulk reopen request). */
+  extraActions?: ReactNode;
   /** Rows the user has ticked, including any now-ineligible ones. */
   selectedCount: number;
   /** Of those, the ones a reassignment request can actually carry. */
@@ -301,14 +307,16 @@ export function ReassignSelectionBar({
 
   return (
     <div className="ew-selection-bar" role="region" aria-label="إجراءات إسناد العينات">
-      <strong>{ar(selectedCount)} محددة يدوياً</strong>
+      {canReassign && <strong>{ar(selectedCount)} محددة يدوياً</strong>}
       <span>
         {ar(filteredCount)} مطابقة للتصفية/البحث الحالي (كل الصفحات)
-        {eligibleFilteredCount !== filteredCount
+        {canReassign && eligibleFilteredCount !== filteredCount
           ? ` — ${ar(eligibleFilteredCount)} قابلة للإسناد`
           : ""}
       </span>
       <div className="ew-selection-actions">
+        {extraActions}
+        {canReassign && (<>
         <button
           type="button"
           className="ew-btn-referral"
@@ -346,6 +354,7 @@ export function ReassignSelectionBar({
         >
           إلغاء التحديد
         </button>
+        </>)}
       </div>
     </div>
   );
