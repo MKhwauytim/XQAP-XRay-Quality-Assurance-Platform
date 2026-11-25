@@ -38,6 +38,16 @@ updates:
       # is belt and braces — it costs nothing and removes the possibility.
       - dependency-name: xlsx
 
+      # `@tanstack/react-virtual` is pinned at exactly 3.14.11. With 3.14.26,
+      # DataTable renders no rows under jsdom, which fails every table-view
+      # test (79 tests with 3.14.26, re-checked 2026-11-25), and the grouped
+      # production PR went red each week because of it. Whether the real app is
+      # affected has not been established. Lift this entry together with the
+      # pin once the virtualizer setup in DataTable is fixed for the new version.
+      - dependency-name: "@tanstack/react-virtual"
+        versions:
+          - "> 3.14.11"
+
     groups:
       # Majors are deliberately left out of every group: React 20 or Vite 9
       # deserves its own PR and its own read of the changelog. Minor/patch
