@@ -905,6 +905,21 @@ export function isStudyCompleted(
 }
 
 /**
+ * Whether a row may be painted completed (green). A submission still queued in
+ * this browser's outbox (`unsyncedKeys`, `${xrayImageId}::${assignee}`) is not:
+ * nobody else can see it yet, and a green row told employees their work was
+ * recorded while the admin found the case unanswered.
+ */
+export function isCompletedOnShare(
+  entry: DistributionEntry,
+  answersMap: Map<string, ItemAnswer>,
+  unsyncedKeys: ReadonlySet<string>
+): boolean {
+  if (entry.status === "completed") return true;
+  return isStudyCompleted(entry, answersMap) && !unsyncedKeys.has(`${entry.xrayImageId}::${entry.assignedTo}`);
+}
+
+/**
  * A submitted "لا يوجد صورة" answer, and not (yet) a supervisor-finalized
  * completion. `entry.status === "completed"` always wins over the answer
  * content — a supervisor who manually closed the row out is a real, final

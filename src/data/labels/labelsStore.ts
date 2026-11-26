@@ -449,6 +449,11 @@ export const DEFAULT_LABELS = {
   ew_answers_pending_sync:         "{count} إجابة محفوظة على هذا الجهاز ولم تصل إلى مجلد العمل المشترك بعد — تُرسل تلقائيًا.",
   ew_answer_saved_locally:         "تم الحفظ على هذا الجهاز، وسيُرسل إلى مجلد العمل تلقائيًا.",
   ew_answers_send_now:             "إرسال الآن",
+  // «إرسال إلى المجلد المشترك» (PendingAnswersBanner): always shown — re-checks every
+  // copy on this device against the shared folder and sends whatever it lacks.
+  ew_answers_send_to_share:        "إرسال إلى المجلد المشترك",
+  ew_answers_send_to_share_hint:   "يتأكد أن كل إجاباتك المحفوظة على هذا الجهاز موجودة في مجلد العمل المشترك، ويرسل ما ينقصه.",
+  ew_answers_send_strays_ok:       "استُرجعت {count} إجابة حفظتها نسخة قديمة من التطبيق، ووصلت إلى مجلد العمل المشترك. افتح التطبيق دائمًا من ملفه في المجلد المشترك.",
   // «إرسال الآن» outcome (PendingAnswersBanner) — one line per reason answers stayed unsent.
   ew_answers_sending:              "جارٍ الإرسال…",
   ew_answers_send_slow:            "ما زال الإرسال جاريًا — مجلد العمل المشترك لا يستجيب. تأكد من الاتصال بالشبكة وبالمجلد المشترك.",

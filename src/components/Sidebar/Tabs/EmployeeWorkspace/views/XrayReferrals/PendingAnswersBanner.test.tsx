@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DEFAULT_LABELS as L } from "../../../../../../data/labels/labelsStore";
 
 const flush = vi.hoisted(() => vi.fn());
+const sendAll = vi.hoisted(() => vi.fn());
 const count = vi.hoisted(() => ({ value: 110 }));
 const fileApi = vi.hoisted(() => ({
   exportUnsentAnswers: vi.fn(async () => ({ answers: [] })),
@@ -12,7 +13,7 @@ const fileApi = vi.hoisted(() => ({
   unsentAnswersFileName: () => "unsent.json",
 }));
 const download = vi.hoisted(() => vi.fn());
-vi.mock("../../../../../../data/answers/answerOutbox", () => ({ flushAnswersNow: flush }));
+vi.mock("../../../../../../data/answers/answerOutbox", () => ({ flushAnswersNow: flush, sendAllAnswersToShare: sendAll }));
 vi.mock("../../../../../../data/answers/usePendingAnswerCount", () => ({ usePendingAnswerCount: () => count.value }));
 vi.mock("../../../../../../data/answers/unsentAnswersFile", () => fileApi);
 vi.mock("../../../../../../utils/downloadFile", () => ({ downloadJson: download }));
@@ -24,7 +25,7 @@ import PendingAnswersBanner from "./PendingAnswersBanner";
 const sent = { replayed: 2, alreadyOnDisk: 0, failed: 0, cannotLand: 0 };
 
 describe("PendingAnswersBanner", () => {
-  beforeEach(() => { count.value = 110; flush.mockReset(); download.mockReset(); });
+  beforeEach(() => { count.value = 110; flush.mockReset(); sendAll.mockReset(); download.mockReset(); });
   afterEach(cleanup);
 
   it("«إرسال الآن» disables while sending, then says why answers stayed unsent and offers a copy", async () => {
@@ -96,5 +97,45 @@ describe("PendingAnswersBanner", () => {
     expect(download).toHaveBeenCalledTimes(1); // the copy, before anything is removed
     expect(discard).toHaveBeenCalledWith("emp1", ["10-October-2026"]);
     expect(download.mock.invocationCallOrder[0]!).toBeLessThan(discard.mock.invocationCallOrder[0]!);
+  });
+
+  describe("«إرسال إلى المجلد المشترك»", () => {
+    it("is offered even with nothing unsent, and reports recovered and confirmed answers", async () => {
+      count.value = 0;
+      sendAll.mockResolvedValueOnce({ replayed: 1, alreadyOnDisk: 4, failed: 0, cannotLand: 0, strayAdopted: 3 });
+      render(<PendingAnswersBanner directoryHandle={{} as never} username="emp1" />);
+
+      fireEvent.click(screen.getByRole("button", { name: L.ew_answers_send_to_share }));
+
+      expect(await screen.findByText(L.ew_answers_send_strays_ok.replace("{count}", "3"))).toBeTruthy();
+      expect(screen.getByText(L.ew_answers_send_ok.replace("{count}", "5"))).toBeTruthy();
+      expect(sendAll).toHaveBeenCalledWith({}, "emp1");
+    });
+
+    it("says why an answer could not be sent", async () => {
+      count.value = 0;
+      sendAll.mockResolvedValueOnce({
+        replayed: 0, alreadyOnDisk: 0, failed: 0, cannotLand: 2, strayAdopted: 0,
+        blocked: { "month-closed": { count: 2, months: ["5-may-2026"] } },
+      });
+      render(<PendingAnswersBanner directoryHandle={{} as never} username="emp1" />);
+
+      fireEvent.click(screen.getByRole("button", { name: L.ew_answers_send_to_share }));
+
+      expect(await screen.findByText(
+        L.ew_answers_send_blocked_month_closed.replace("{count}", "2").replace("{months}", "5-may-2026")
+      )).toBeTruthy();
+    });
+
+    it("does not send when the browser refuses write access", async () => {
+      count.value = 0;
+      const handle = { queryPermission: vi.fn(async () => "prompt"), requestPermission: vi.fn(async () => "denied") };
+      render(<PendingAnswersBanner directoryHandle={handle as never} username="emp1" />);
+
+      fireEvent.click(screen.getByRole("button", { name: L.ew_answers_send_to_share }));
+
+      expect(await screen.findByText(L.ew_answers_send_permission)).toBeTruthy();
+      expect(sendAll).not.toHaveBeenCalled();
+    });
   });
 });

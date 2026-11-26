@@ -1,10 +1,11 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { logError } from "../storage/errorLogger";
 import { requestStoragePersistence } from "../storage/storageRegistry";
-import { queueAnswerForLanding } from "./answerLocalMirror";
+import { loadSyncedAnswerRecords, mirrorAnswerLocally, queueAnswerForLanding } from "./answerLocalMirror";
 import { mintAnswerEventIdentity } from "./answerStorage";
 import { timeAnswerStep } from "./answerTimings";
 import { replayPendingAnswers, type PendingReplaySummary } from "./pendingAnswerReplay";
+import { adoptStrayFlatAnswersAllMonths } from "./strayFlatAnswers";
 import type { ItemAnswer } from "./answerTypes";
 
 export type AnswerSubmitMode = "outbox" | "sync";
@@ -83,6 +84,51 @@ export async function flushAnswersNow(
 ): Promise<PendingReplaySummary> {
   if (timer) { clearTimeout(timer); timer = null; }
   return replay(directoryHandle, username);
+}
+
+export type SendToShareSummary = PendingReplaySummary & {
+  /** Answers recovered from an outdated app copy's files (strayFlatAnswers.ts). */
+  strayAdopted: number;
+};
+
+function mergeReplaySummaries(a: PendingReplaySummary, b: PendingReplaySummary): PendingReplaySummary {
+  const blocked: NonNullable<PendingReplaySummary["blocked"]> = { ...a.blocked };
+  for (const [reason, entry] of Object.entries(b.blocked ?? {}) as Array<[keyof typeof blocked, { count: number; months: string[] }]>) {
+    const previous = blocked[reason];
+    blocked[reason] = previous
+      ? { count: previous.count + entry.count, months: [...new Set([...previous.months, ...entry.months])] }
+      : entry;
+  }
+  return {
+    replayed: a.replayed + b.replayed,
+    alreadyOnDisk: a.alreadyOnDisk + b.alreadyOnDisk,
+    failed: a.failed + b.failed,
+    cannotLand: a.cannotLand + b.cannotLand,
+    ...(Object.keys(blocked).length > 0 ? { blocked } : {}),
+    ...(b.lastError ?? a.lastError ? { lastError: b.lastError ?? a.lastError } : {}),
+    ...(a.skipped || b.skipped ? { skipped: true as const } : {}),
+  };
+}
+
+/**
+ * «إرسال إلى المجلد المشترك»: everything this employee's answers could be
+ * stuck behind, in one press — the unsent queue, every copy this browser holds
+ * that the share turns out not to have, and answers an outdated copy of the app
+ * wrote where current clients never look. Each goes through the same
+ * conflict-safe replay, so an answer the share already holds (or holds newer)
+ * is left alone.
+ */
+export async function sendAllAnswersToShare(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  replay: typeof replayPendingAnswers = replayPendingAnswers,
+  adoptStray: typeof adoptStrayFlatAnswersAllMonths = adoptStrayFlatAnswersAllMonths
+): Promise<SendToShareSummary> {
+  if (timer) { clearTimeout(timer); timer = null; }
+  const pending = await replay(directoryHandle, username);
+  const copies = await replay(directoryHandle, username, { loadPending: loadSyncedAnswerRecords, markSynced: mirrorAnswerLocally });
+  const strays = await adoptStray(directoryHandle, { onlyUser: username, force: true });
+  return { ...mergeReplaySummaries(pending, copies), strayAdopted: strays.adopted };
 }
 
 export function __resetAnswerOutboxForTests(): void {

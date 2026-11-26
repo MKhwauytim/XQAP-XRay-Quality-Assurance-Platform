@@ -5,6 +5,13 @@ import type { ChangelogEntry } from "./changelogTypes";
 
 export const LATEST_UPDATES: ChangelogEntry[] = [
   {
+    "version": "v161.3",
+    "date": "2026-11-26",
+    "bucket": "fix",
+    "scope": "answers",
+    "title": "recover answers an outdated app copy wrote, no green row for unsent answers, «إرسال إلى المجلد المشترك»"
+  },
+  {
     "version": "v161.2",
     "date": "2026-11-25",
     "bucket": "feature",
@@ -66,12 +73,5 @@ export const LATEST_UPDATES: ChangelogEntry[] = [
     "bucket": "fix",
     "scope": "port report",
     "title": "v160.16 static exporter also reads the month-split quarter sheets (Q3M7)"
-  },
-  {
-    "version": "v160.15",
-    "date": "2026-11-10",
-    "bucket": "fix",
-    "scope": "port report",
-    "title": "v160.15 read month-split quarter sheets (Q3M7, Q3M8, Q3M9) and the «تاريخ الدخول» header"
   }
 ];

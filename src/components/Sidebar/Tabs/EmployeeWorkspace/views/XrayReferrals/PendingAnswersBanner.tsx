@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, ReactElement } from "react";
-import { flushAnswersNow } from "../../../../../../data/answers/answerOutbox";
+import { flushAnswersNow, sendAllAnswersToShare } from "../../../../../../data/answers/answerOutbox";
 import { discardPendingAnswers } from "../../../../../../data/answers/answerLocalMirror";
 import { ConfirmDialog } from "../../../../../ConfirmDialog/ConfirmDialog";
 import {
@@ -74,6 +74,25 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
     }
   };
 
+  const sendToShare = async (): Promise<void> => {
+    setState("sending");
+    setResult([]);
+    const granted = await ensureDirectoryPermission(directoryHandle, "readwrite").catch(() => false);
+    if (!granted) { finish([L.ew_answers_send_permission], unsent > 0); return; }
+    const slowTimer = setTimeout(() => { if (mounted.current) setState("slow"); }, SEND_NOW_SLOW_MS);
+    try {
+      const summary = await sendAllAnswersToShare(directoryHandle, username);
+      if (mounted.current) setMissingMonths(summary.blocked?.["folder-missing"]?.months ?? []);
+      const strays = summary.strayAdopted > 0 ? [L.ew_answers_send_strays_ok.replace("{count}", String(summary.strayAdopted))] : [];
+      finish([...strays, ...describeFlushResult(summary, L)], flushLeftAnswersBehind(summary));
+    } catch (error) {
+      logError("answers:send-to-share", error);
+      finish([L.ew_answers_send_failed.replace("{count}", String(unsent)).replace("{error}", errorText(error))], unsent > 0);
+    } finally {
+      clearTimeout(slowTimer);
+    }
+  };
+
   const downloadBackup = async (): Promise<void> => {
     try {
       const file = await exportUnsentAnswers(username);
@@ -134,8 +153,14 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
     </>
   );
 
-  if (unsent <= 0 && state !== "done") {
-    return <p className="ew-import-unsent" dir="rtl">{importControl}</p>;
+  const sendToShareControl = (
+    <button type="button" onClick={() => void sendToShare()} disabled={busy} title={L.ew_answers_send_to_share_hint}>
+      {L.ew_answers_send_to_share}
+    </button>
+  );
+
+  if (unsent <= 0 && state !== "done" && !busy) {
+    return <p className="ew-import-unsent" dir="rtl">{sendToShareControl}{importControl}</p>;
   }
   return (
     <div className="ew-msg-warn ew-pending-sync" role="status" dir="rtl">
@@ -148,9 +173,11 @@ export default function PendingAnswersBanner({ directoryHandle, username }: {
           {(offerBackup || state === "done") && (
             <button type="button" onClick={() => void downloadBackup()} disabled={busy}>{L.ew_answers_backup}</button>
           )}
+          {sendToShareControl}
           {importControl}
         </p>
       )}
+      {unsent <= 0 && <p>{sendToShareControl}{importControl}</p>}
       {state === "slow" && <p>{L.ew_answers_send_slow}</p>}
       {state === "done" && result.map((line) => <p key={line}>{line}</p>)}
       {state === "done" && offerBackup && unsent > 0 && <p>{L.ew_answers_backup_hint}</p>}

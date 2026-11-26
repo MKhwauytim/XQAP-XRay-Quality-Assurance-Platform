@@ -120,7 +120,7 @@ import {
   buildDefaultColConfig,
   loadLocalColConfig,
   getVisibleReferralColumns,
-  isStudyCompleted,
+  isCompletedOnShare,
   REFERRALS_PRESET_KEY,
   XrQueueToolbarExtras,
 } from "./XrayReferrals/subComponents";
@@ -1951,7 +1951,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
               expandedKey={selEntryId}
               onRowClick={(e) => selectEntry(e.xrayImageId)}
-              getRowClassName={(entry) => isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)}
+              getRowClassName={(entry) => isCompletedOnShare(entry, answersMap, unsyncedKeys) ? "dt-tr--completed" : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)}
               // Every role that can open this page sees the case chips (an
               // ordinary employee is their primary user); the scope picker
               // stays oversight-only, as before.

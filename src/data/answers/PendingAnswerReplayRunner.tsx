@@ -53,11 +53,17 @@ import { logError } from "../storage/errorLogger";
 import { pruneAnswerDrafts } from "./answerDraftStore";
 import { getSyncIntervalMs, subscribeToSyncInterval } from "../workspace/workspaceSync";
 import { replayPendingAnswers } from "./pendingAnswerReplay";
+import { adoptStrayFlatAnswersAllMonths } from "./strayFlatAnswers";
+import { reportStuckAnswers } from "./stuckAnswersReport";
 import { usePendingAnswerCount } from "./usePendingAnswerCount";
 import { useUnloadGuard } from "../../hooks/useUnloadGuard";
 
 /** The feature id the answer-save UI itself gates on (`XrayReferrals.tsx`). */
 const SUBMIT_ANSWERS_FEATURE_ID = "submit-answers";
+/** Holders of this may recover every employee's stray answers; everyone else only their own. */
+const ANSWER_ON_BEHALF_FEATURE_ID = "answer-on-behalf";
+/** Stray-answer scans list every month folder, so they run far less often than the outbox replay. */
+const STRAY_ADOPTION_INTERVAL_MS = 5 * 60_000;
 
 export function PendingAnswerReplayRunner({
   username,
@@ -70,6 +76,7 @@ export function PendingAnswerReplayRunner({
   const { directoryHandle, status } = useWorkspace();
   const { canMutate } = usePermissions();
   const canReplay = !isReadOnlyMode() && canMutate(SUBMIT_ANSWERS_FEATURE_ID);
+  const canAdoptForAll = canReplay && canMutate(ANSWER_ON_BEHALF_FEATURE_ID);
 
   // Closing/reloading the tab with answers still unsent would lose nothing
   // (they live in IndexedDB) but would delay landing; ask the browser to confirm.
@@ -95,9 +102,11 @@ export function PendingAnswerReplayRunner({
       // toggling it mid-interval would otherwise not be seen until whatever
       // NEXT happens to re-render this component. Re-check it directly here.
       if (isReadOnlyMode()) return;
-      void replayPendingAnswers(directoryHandle, username).catch((error: unknown) => {
-        logError("answers:pending-replay", error);
-      });
+      void replayPendingAnswers(directoryHandle, username)
+        .then((summary) => reportStuckAnswers(username, summary))
+        .catch((error: unknown) => {
+          logError("answers:pending-replay", error);
+        });
     };
     const onOnline = (): void => tick(true);
     const onVisibility = (): void => {
@@ -119,6 +128,26 @@ export function PendingAnswerReplayRunner({
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [enabled, status, directoryHandle, username, canReplay]);
+
+  // Answers an outdated copy of the app wrote where current clients never look
+  // (see strayFlatAnswers.ts): found and landed with no one having to ask.
+  useEffect(() => {
+    if (!enabled || status !== "ready" || !directoryHandle || !canReplay) return;
+    let disposed = false;
+    const scan = (): void => {
+      if (disposed || isReadOnlyMode()) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      // Views refresh on their own: the replay it runs broadcasts every landing.
+      void adoptStrayFlatAnswersAllMonths(directoryHandle, canAdoptForAll ? {} : { onlyUser: username })
+        .catch((error: unknown) => logError("answers:stray-flat-adopt", error));
+    };
+    const interval = window.setInterval(scan, STRAY_ADOPTION_INTERVAL_MS);
+    scan();
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [enabled, status, directoryHandle, username, canReplay, canAdoptForAll]);
 
   return null;
 }
