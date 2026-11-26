@@ -7,7 +7,10 @@ const prune = vi.hoisted(() => vi.fn());
 const canMutate = vi.hoisted(() => vi.fn((_featureId: string) => true));
 const isReadOnlyMode = vi.hoisted(() => vi.fn(() => false));
 
+const adoptStray = vi.hoisted(() => vi.fn(async (_root: unknown, _options: { onlyUser?: string }) => ({ adopted: 0 })));
+
 vi.mock("./pendingAnswerReplay", () => ({ replayPendingAnswers: replay }));
+vi.mock("./strayFlatAnswers", () => ({ adoptStrayFlatAnswersAllMonths: adoptStray }));
 vi.mock("./answerDraftStore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./answerDraftStore")>()),
   pruneAnswerDrafts: prune,
@@ -60,6 +63,7 @@ beforeEach(() => {
   unsentCount.value = 0;
   vi.useFakeTimers();
   replay.mockClear();
+  adoptStray.mockClear();
   prune.mockClear();
   canMutate.mockReset().mockReturnValue(true);
   isReadOnlyMode.mockReset().mockReturnValue(false);
@@ -235,5 +239,31 @@ describe("PendingAnswerReplayRunner", () => {
     replay.mockClear();
     window.dispatchEvent(new Event("online"));
     expect(replay).not.toHaveBeenCalled();
+  });
+
+  describe("stray answers from outdated app copies", () => {
+    it("scans every employee's strays at mount and every 5 minutes for an answer-on-behalf holder", async () => {
+      render(<PendingAnswerReplayRunner username="admin" />);
+      expect(adoptStray).toHaveBeenCalledTimes(1);
+      expect(adoptStray).toHaveBeenCalledWith(stableDirectoryHandle, {});
+      await act(async () => { vi.advanceTimersByTime(5 * 60_000); });
+      expect(adoptStray).toHaveBeenCalledTimes(2);
+    });
+
+    it("limits an ordinary employee to their own strays", () => {
+      canMutate.mockImplementation((featureId: string) => featureId !== "answer-on-behalf");
+      render(<PendingAnswerReplayRunner username="emp1" />);
+      expect(adoptStray).toHaveBeenCalledWith(stableDirectoryHandle, { onlyUser: "emp1" });
+    });
+
+    it("never scans without permission to submit answers, or in read-only mode", () => {
+      canMutate.mockReturnValue(false);
+      render(<PendingAnswerReplayRunner username="emp1" />);
+      cleanup();
+      canMutate.mockReturnValue(true);
+      isReadOnlyMode.mockReturnValue(true);
+      render(<PendingAnswerReplayRunner username="emp1" />);
+      expect(adoptStray).not.toHaveBeenCalled();
+    });
   });
 });

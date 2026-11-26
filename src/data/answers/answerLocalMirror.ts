@@ -495,6 +495,22 @@ export async function loadMirroredAnswers(month: string, username: string): Prom
     .map((record) => record.item);
 }
 
+/**
+ * Every answer of this user this browser holds a copy of that is marked as
+ * already on the share (`synced: true`), across all months. The manual
+ * «إرسال إلى المجلد المشترك» re-checks these against the share: a copy whose
+ * answer the share does not hold (the wrong folder was open when it "landed",
+ * the share was restored from an older backup) is sent again.
+ */
+export async function loadSyncedAnswerRecords(
+  username: string
+): Promise<Array<{ month: string; item: ItemAnswer; identity?: OutboxIdentity }>> {
+  const all = await readAllRecords();
+  return all
+    .filter((record) => record.username === username && record.synced)
+    .map((record) => ({ month: record.month, item: record.item }));
+}
+
 /** How many of this employee's own answers are still queued (`synced: false`) for this month — the count behind the "not saved yet" UI notice. */
 export async function countPendingAnswers(month: string, username: string): Promise<number> {
   const all = await readAllRecords();
